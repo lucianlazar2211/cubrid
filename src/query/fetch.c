@@ -172,6 +172,7 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
     case T_POSITION:
     case T_FINDINSET:
     case T_ADD_MONTHS:
+    case T_CSTFNC:
     case T_MONTHS_BETWEEN:
     case T_AES_ENCRYPT:
     case T_AES_DECRYPT:
@@ -1581,6 +1582,20 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
 	  PRIM_SET_NULL (arithptr->value);
 	}
       else if (db_add_months (peek_left, peek_right, arithptr->value) != NO_ERROR)
+	{
+	  goto error;
+	}
+      break;
+
+    case T_CSTFNC:
+      if(DB_IS_NULL (peek_right))
+	{
+	  if(db_cstfnc(arithptr->value, 1, DB_GET_INTEGER(peek_left)) != NO_ERROR)
+	    {
+	      goto error;
+	    }
+	}
+      else if (db_cstfnc(arithptr->value, 2, DB_GET_INTEGER(peek_left), DB_GET_INTEGER(peek_right)) != NO_ERROR)
 	{
 	  goto error;
 	}

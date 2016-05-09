@@ -3157,6 +3157,7 @@ get_opcode_rank (PT_OP_TYPE opcode)
     case PT_LEAST:
     case PT_GREATEST:
     case PT_ADD_MONTHS:
+    case PT_CSTFNC:
     case PT_LAST_DAY:
     case PT_MONTHS_BETWEEN:
 
@@ -3698,6 +3699,8 @@ pt_is_pseudo_const (PT_NODE * expr)
 	case PT_ADD_MONTHS:
 	  return (pt_is_pseudo_const (expr->info.expr.arg1)
 		  && pt_is_pseudo_const (expr->info.expr.arg2)) ? true : false;
+	case PT_CSTFNC:
+	  return pt_is_pseudo_const (expr->info.expr.arg1) ? true : false;
 	case PT_LAST_DAY:
 	case PT_UNIX_TIMESTAMP:
 	  if (expr->info.expr.arg1)

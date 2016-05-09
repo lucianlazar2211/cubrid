@@ -3537,6 +3537,8 @@ pt_show_binopcode (PT_OP_TYPE n)
       return "sys_connect_by_path ";
     case PT_ADD_MONTHS:
       return "add_months ";
+    case PT_CSTFNC:
+      return "cstfnc ";
     case PT_LAST_DAY:
       return "last_day ";
     case PT_MONTHS_BETWEEN:
@@ -10679,6 +10681,18 @@ pt_print_expr (PARSER_CONTEXT * parser, PT_NODE * p)
       q = pt_append_nulstring (parser, q, ")");
       break;
 
+    case PT_CSTFNC:
+      q = pt_append_nulstring (parser, q, " cstfnc(");
+      r1 = pt_print_bytes (parser, p->info.expr.arg1);
+      q = pt_append_varchar (parser, q, r1);
+      if(p->info.expr.arg2 != NULL){
+	q = pt_append_nulstring (parser, q, ", ");
+	r2 = pt_print_bytes (parser, p->info.expr.arg2);
+	q = pt_append_varchar (parser, q, r2);
+      }
+      q = pt_append_nulstring (parser, q, ")");
+      break;
+
     case PT_SYS_CONNECT_BY_PATH:
       r1 = pt_print_bytes (parser, p->info.expr.arg1);
       r2 = pt_print_bytes (parser, p->info.expr.arg2);
@@ -11003,7 +11017,7 @@ pt_print_expr (PARSER_CONTEXT * parser, PT_NODE * p)
 	}
       q = pt_append_nulstring (parser, q, ")");
       break;
-
+   
     case PT_MID:
       q = pt_append_nulstring (parser, q, " mid(");
       r1 = pt_print_bytes (parser, p->info.expr.arg1);
@@ -17378,6 +17392,7 @@ pt_is_const_expr_node (PT_NODE * node)
 	case PT_LOCATE:
 	  return (pt_is_const_expr_node (node->info.expr.arg1) && pt_is_const_expr_node (node->info.expr.arg2)
 		  && (node->info.expr.arg3 ? pt_is_const_expr_node (node->info.expr.arg3) : true)) ? true : false;
+	
 	case PT_CHAR_LENGTH:
 	case PT_OCTET_LENGTH:
 	case PT_BIT_LENGTH:
@@ -17413,6 +17428,8 @@ pt_is_const_expr_node (PT_NODE * node)
 	case PT_ADD_MONTHS:
 	  return (pt_is_const_expr_node (node->info.expr.arg1)
 		  && pt_is_const_expr_node (node->info.expr.arg2)) ? true : false;
+	case PT_CSTFNC:
+	  return (pt_is_const_expr_node (node->info.expr.arg1)) ? true : false;
 	case PT_LAST_DAY:
 	  return pt_is_const_expr_node (node->info.expr.arg1);
 	case PT_UNIX_TIMESTAMP:
@@ -17999,6 +18016,7 @@ pt_is_allowed_as_function_index (const PT_NODE * expr)
     case PT_CRC32:
       return true;
     case PT_TZ_OFFSET:
+    case PT_CSTFNC:
     default:
       return false;
     }

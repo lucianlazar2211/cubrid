@@ -22,7 +22,7 @@
  */
 
 #ident "$Id$"
-
+#include <stdarg.h>
 #include "config.h"
 
 #include <assert.h>

@@ -222,7 +222,7 @@ int yybuffer_pos;
 										return CRITICAL; }
 [cC][uU][mM][eE][_][dD][iI][sS][tT]					{ begin_token(yytext);
 										csql_yylval.cptr = pt_makename(yytext);
-										return CUME_DIST; }
+										return CUME_DIST; }									
 [cC][uU][rR][rR][eE][nN][tT]						{ begin_token(yytext);   return CURRENT; }
 [cC][uU][rR][rR][eE][nN][tT]_[dD][aA][tT][eE]				{ begin_token(yytext);   return CURRENT_DATE; }
 [cC][uU][rR][rR][eE][nN][tT]_[tT][iI][mM][eE]				{ begin_token(yytext);   return CURRENT_TIME; }
@@ -709,7 +709,7 @@ int yybuffer_pos;
 [sS][lL][oO][tT][tT][eE][dD]						{ begin_token(yytext);
 										csql_yylval.cptr = pt_makename(yytext);
 										return SLOTTED; }
-
+[cC][uU][sS][tT][oO][mM][fF][uU][nN][cC]				{ begin_token(yytext);   return CUSTOMFUNC; }	
 [sS][oO][mM][eE]							{ begin_token(yytext);   return SOME; }
 [sS][qQ][lL]								{ begin_token(yytext);   return SQL; }
 [sS][qQ][lL][cC][oO][dD][eE]						{ begin_token(yytext);   return SQLCODE; }
@@ -775,7 +775,7 @@ int yybuffer_pos;
 [tT][eE][mM][pP][oO][rR][aA][rR][yY]					{ begin_token(yytext);   return TEMPORARY; }
 [tT][eE][xX][tT]							{ begin_token(yytext);   
 										csql_yylval.cptr = pt_makename(yytext);
-										return TEXT; }
+										return TEXT; }			
 [tT][hH][eE][nN]							{ begin_token(yytext);   return THEN; }
 [tT][hH][rR][eE][aA][dD][sS]						{ begin_token(yytext);
 										csql_yylval.cptr = pt_makename(yytext);
@@ -1356,6 +1356,7 @@ _[uU][tT][fF]8[']		{
 \\[R][S][D]				{ begin_token(yytext);   return SERBIAN_DINAR_SIGN; }
 
 .					{ begin_token(yytext);   return yytext[0]; }
+
 %%
 
 int parser_yyinput_single_mode = 0;

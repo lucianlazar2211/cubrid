@@ -53,7 +53,7 @@
 #include "crypt_opfunc.h"
 #include "base64.h"
 #include "tz_support.h"
-
+#include <stdarg.h>
 /* this must be the last header file included!!! */
 #include "dbval.h"
 
@@ -11658,6 +11658,35 @@ db_add_months (const DB_VALUE * src_date, const DB_VALUE * nmonth, DB_VALUE * re
       return error_status;
     }
   return error_status;
+}
+
+  /*
+   *  db_cstfnc() -
+   */
+int
+db_cstfnc(DB_VALUE * result, int no, ... )
+{    
+  int x, y, buf;  
+  va_list list;
+  y = 0;
+  va_start(list, no);
+  x = va_arg(list, int);
+  if(no == 1)
+    {
+      while(x)
+      {
+	y = y * 10 +  x % 10;
+	x	  /= 10;
+      }
+      DB_MAKE_INTEGER(result, y);
+    }
+  else
+    {
+      y = va_arg(list, int);
+      DB_MAKE_INTEGER(result, x + y);
+    }
+  va_end(list);
+  return 0;
 }
 
 /*
