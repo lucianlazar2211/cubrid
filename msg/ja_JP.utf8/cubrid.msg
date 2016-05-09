@@ -1416,6 +1416,7 @@ $set 7 MSGCAT_SET_PARSER_SYNTAX
 125 sessiontimezoneの使用が無効です\n sessiontimezone
 126 class/vclassコメントの最大長は%1$dバイトです。
 127 コメントの最大長は%1$dバイトです。
+128 The function customfunc requires 1 or 2 parameters.
 
 $set 8 MSGCAT_SET_PARSER_SEMANTIC
 1 メモリーが足りません。

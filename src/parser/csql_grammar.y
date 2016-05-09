@@ -15416,7 +15416,7 @@ reserved_func
 
 		DBG_PRINT}}
 	| CUSTOMFUNC
-		{ push_msg(MSGCAT_SYNTAX_INVALID_ADD_MONTHS); }
+		{ push_msg(MSGCAT_SYNTAX_CUSTOMFUNC); }
 	  '(' expression_ ')'
 		{ pop_msg(); }
 		{{
@@ -15426,7 +15426,7 @@ reserved_func
 
 		DBG_PRINT}}	
 	| CUSTOMFUNC
-		{ push_msg(MSGCAT_SYNTAX_INVALID_ADD_MONTHS); }
+		{ push_msg(MSGCAT_SYNTAX_CUSTOMFUNC); }
 	  '(' expression_ ',' expression_ ')'
 		{ pop_msg(); }
 		{{
