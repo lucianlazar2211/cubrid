@@ -1588,6 +1588,10 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
       break;
 
     case T_CSTFNC:
+      if(DB_IS_NULL (peek_left) || (DB_IS_NULL(peek_left) && DB_IS_NULL (peek_right))){
+	DB_MAKE_NULL(arithptr->value);
+	break;
+      }
       if(DB_IS_NULL (peek_right))
 	{
 	  if(db_cstfnc(arithptr->value, 1, DB_GET_INTEGER(peek_left)) != NO_ERROR)

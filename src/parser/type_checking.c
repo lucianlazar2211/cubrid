@@ -17570,7 +17570,10 @@ pt_evaluate_db_value_expr (PARSER_CONTEXT * parser, PT_NODE * expr, PT_OP_TYPE o
     case PT_CSTFNC:
       /* Function implementation */
       /* TODO: add db_custom_func */
-
+      if(DB_IS_NULL(arg1) || (DB_IS_NULL(arg1) && DB_IS_NULL(arg2))){
+	DB_MAKE_NULL(result);
+	return 1;
+      }
       if(!DB_IS_NULL (arg2)){
 	error = db_cstfnc(result, 2, DB_GET_INTEGER(arg1), DB_GET_INTEGER(arg2));
       }
