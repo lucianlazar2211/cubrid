@@ -840,6 +840,36 @@ pt_get_expression_definition (const PT_OP_TYPE op, EXPRESSION_DEFINITION * def)
       def->overloads_count = num;
       break;
 
+    case PT_CSTFNC:
+      num = 0;
+      /* one overload */
+      /* arg1 */
+      sig.arg1_type.is_generic = false;
+      sig.arg1_type.val.type = PT_TYPE_INTEGER;
+
+      /* return type */
+      sig.return_type.is_generic = false;
+      sig.return_type.val.type = PT_TYPE_INTEGER;
+
+      def->overloads[num++] = sig;
+
+      /* arg1 */
+      sig.arg1_type.is_generic = false;
+      sig.arg1_type.val.type = PT_TYPE_INTEGER;
+
+      /* arg2 */
+      sig.arg2_type.is_generic = false;
+      sig.arg2_type.val.type = PT_TYPE_INTEGER;
+
+      /* return type */
+      sig.return_type.is_generic = false;
+      sig.return_type.val.type = PT_TYPE_INTEGER;
+
+      def->overloads[num++] = sig;
+
+      def->overloads_count = num;
+      break;
+
     case PT_FROMDAYS:
       num = 0;
 
@@ -6726,6 +6756,7 @@ pt_is_symmetric_op (const PT_OP_TYPE op)
     case PT_REPLACE:
     case PT_TRANSLATE:
     case PT_ADD_MONTHS:
+    case PT_CSTFNC:
     case PT_LAST_DAY:
     case PT_MONTHS_BETWEEN:
     case PT_SYS_DATE:
@@ -8907,6 +8938,7 @@ pt_is_able_to_determine_return_type (const PT_OP_TYPE op)
     case PT_SIGN:
     case PT_CHR:
     case PT_ADD_MONTHS:
+    case PT_CSTFNC:
     case PT_LAST_DAY:
     case PT_MONTHS_BETWEEN:
     case PT_DATE_ADD:
@@ -17534,6 +17566,23 @@ pt_evaluate_db_value_expr (PARSER_CONTEXT * parser, PT_NODE * expr, PT_OP_TYPE o
 	{
 	  return 1;
 	}
+
+    case PT_CSTFNC:
+      /* Function implementation */
+      /* TODO: add db_custom_func */
+      if(DB_IS_NULL(arg1) || (DB_IS_NULL(arg1) && DB_IS_NULL(arg2))){
+	DB_MAKE_NULL(result);
+	return 1;
+      }
+      if(!DB_IS_NULL (arg2)){
+	error = db_cstfnc(result, 2, DB_GET_INTEGER(arg1), DB_GET_INTEGER(arg2));
+      }
+      else{
+	error = db_cstfnc(result, 1, DB_GET_INTEGER(arg1));
+      }
+      if(error == 1)
+	return 1;
+      return 0;
 
     case PT_LAST_DAY:
       error = db_last_day (arg1, result);

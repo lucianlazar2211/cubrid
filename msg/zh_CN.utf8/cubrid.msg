@@ -1416,6 +1416,7 @@ $set 7 MSGCAT_SET_PARSER_SYNTAX
 125 非法使用 sessiontimezone\n sessiontimezone
 126 一个class或vclass的comment的最大长度是 %1$d 字节.
 127 一个comment的最大长度是 %1$d 字节.
+128 The function customfunc requires 1 or 2 parameters.
 
 $set 8 MSGCAT_SET_PARSER_SEMANTIC
 1 内存耗尽.

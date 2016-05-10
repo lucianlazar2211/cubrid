@@ -1416,6 +1416,7 @@ $set 7 MSGCAT_SET_PARSER_SYNTAX
 125 Utilisation non valide de sessiontimezone\n sessiontimezone
 126 La dimension maximale d'un commentaire class/vclass est %1$d octets.
 127 La dimension maximale d'un commentaire est %1$d octets.
+128 The function customfunc requires 1 or 2 parameters.
 
 $set 8 MSGCAT_SET_PARSER_SEMANTIC
 1 Mémoire épuisée.

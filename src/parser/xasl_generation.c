@@ -7039,8 +7039,8 @@ pt_to_regu_variable (PARSER_CONTEXT * parser, PT_NODE * node, UNBOX unbox)
 		  || node->info.expr.op == PT_POSITION || node->info.expr.op == PT_FINDINSET
 		  || node->info.expr.op == PT_LPAD || node->info.expr.op == PT_RPAD || node->info.expr.op == PT_REPLACE
 		  || node->info.expr.op == PT_TRANSLATE || node->info.expr.op == PT_ADD_MONTHS
-		  || node->info.expr.op == PT_MONTHS_BETWEEN || node->info.expr.op == PT_FORMAT
-		  || node->info.expr.op == PT_ATAN || node->info.expr.op == PT_ATAN2
+		  || node->info.expr.op == PT_CSTFNC || node->info.expr.op == PT_MONTHS_BETWEEN 
+		  || node->info.expr.op == PT_FORMAT || node->info.expr.op == PT_ATAN || node->info.expr.op == PT_ATAN2
 		  || node->info.expr.op == PT_DATE_FORMAT || node->info.expr.op == PT_STR_TO_DATE
 		  || node->info.expr.op == PT_TIME_FORMAT || node->info.expr.op == PT_DATEDIFF
 		  || node->info.expr.op == PT_TIMEDIFF || node->info.expr.op == PT_TO_NUMBER
@@ -8106,6 +8106,10 @@ pt_to_regu_variable (PARSER_CONTEXT * parser, PT_NODE * node, UNBOX unbox)
 
 		  regu = pt_make_regu_arith (r1, r2, NULL, T_ADD_MONTHS, domain);
 		  parser_free_tree (parser, data_type);
+		  break;
+		
+		case PT_CSTFNC:
+		    regu = pt_make_regu_arith (r1, r2, NULL, T_CSTFNC, domain);
 		  break;
 
 		case PT_LAST_DAY:
@@ -23310,6 +23314,7 @@ validate_regu_key_function_index (REGU_VARIABLE * regu_var)
 	case T_FROM_BASE64:
 	case T_TZ_OFFSET:
 	case T_CRC32:
+	case T_CSTFNC:
 	  break;
 	default:
 	  return true;

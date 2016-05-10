@@ -1416,6 +1416,7 @@ $set 7 MSGCAT_SET_PARSER_SYNTAX
 125 uso invalido de sessiontimezone\n sessiontimezone
 126 Longitud maxima de un comentario class/vclass es %1$d bytes.
 127 Longitud maxima de un comentario es %1$d bytes.
+128 The function customfunc requires 1 or 2 parameters.
 
 $set 8 MSGCAT_SET_PARSER_SEMANTIC
 1 Sin memoria.

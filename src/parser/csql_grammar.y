@@ -88,7 +88,7 @@ extern int yybuffer_pos;
 %{
 #define YYMAXDEPTH	1000000
 
-/* #define PARSER_DEBUG */
+/*#define PARSER_DEBUG*/
 
 #include "config.h"
 
@@ -1115,6 +1115,7 @@ int g_original_buffer_len;
 %token CURRENT_TIMESTAMP
 %token CURRENT_USER
 %token CURSOR
+%token CUSTOMFUNC
 %token CYCLE
 %token DATA
 %token DATABASE
@@ -15414,6 +15415,26 @@ reserved_func
 			PARSER_SAVE_ERR_CONTEXT ($$, @$.buffer_pos)
 
 		DBG_PRINT}}
+	| CUSTOMFUNC
+		{ push_msg(MSGCAT_SYNTAX_CUSTOMFUNC); }
+	  '(' expression_ ')'
+		{ pop_msg(); }
+		{{
+
+			$$ = parser_make_expression (this_parser, PT_CSTFNC, $4, NULL, NULL);
+			PARSER_SAVE_ERR_CONTEXT ($$, @$.buffer_pos)
+
+		DBG_PRINT}}	
+	| CUSTOMFUNC
+		{ push_msg(MSGCAT_SYNTAX_CUSTOMFUNC); }
+	  '(' expression_ ',' expression_ ')'
+		{ pop_msg(); }
+		{{
+
+			$$ = parser_make_expression (this_parser, PT_CSTFNC, $4, $6, NULL);
+			PARSER_SAVE_ERR_CONTEXT ($$, @$.buffer_pos)
+
+		DBG_PRINT}}	
 	| OCTET_LENGTH
 		{ push_msg(MSGCAT_SYNTAX_INVALID_OCTET_LENGTH); }
 	  '(' expression_ ')'
@@ -24937,7 +24958,8 @@ parser_keyword_func (const char *name, PT_NODE * args)
 
       node = parser_make_expression (this_parser, key->op, a1, a2, a3);
       return node;
-
+      
+    
     case PT_MID:
       if (c != 3)
 	return NULL;
@@ -25076,7 +25098,6 @@ resolve_alias_in_expr_node (PT_NODE * node, PT_NODE * list)
 	  resolve_alias_in_expr_node (node->info.expr.arg3, list);
 	}
       break;
-
     default:;
     }
 }

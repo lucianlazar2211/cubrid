@@ -5273,6 +5273,7 @@ pt_find_partition_column_count (PT_NODE * expr, PT_NODE ** name_node)
     case PT_REPLACE:
     case PT_TRANSLATE:
     case PT_ADD_MONTHS:
+    case PT_CSTFNC:
     case PT_LAST_DAY:
     case PT_MONTHS_BETWEEN:
     case PT_SYS_DATE:
@@ -14948,6 +14949,7 @@ pt_check_filter_index_expr_pre (PARSER_CONTEXT * parser, PT_NODE * node, void *a
 	case PT_TRANSLATE:
 	case PT_REPEAT:
 	case PT_ADD_MONTHS:
+	case PT_CSTFNC:
 	case PT_LAST_DAY:
 	case PT_MONTHS_BETWEEN:
 	case PT_TO_CHAR:

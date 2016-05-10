@@ -1495,7 +1495,7 @@ typedef enum
   PT_UTC_TIMESTAMP,
   PT_CRC32,
   PT_SCHEMA_DEF,
-
+  PT_CSTFNC,
   /* This is the last entry. Please add a new one before it. */
   PT_LAST_OPCODE
 } PT_OP_TYPE;
