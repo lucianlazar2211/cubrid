@@ -15682,7 +15682,7 @@ reserved_func
 			PARSER_SAVE_ERR_CONTEXT ($$, @$.buffer_pos)
         DBG_PRINT}}
         | PG_COLUMN_SIZE
-		{ push_msg(MSGCAT_SYNTAX_INVALID_BIT_LENGTH); }
+		{ push_msg(MSGCAT_SYNTAX_INVALID_PG_COLUMN_SIZE); }
 	  '(' expression_ ')'
 		{ pop_msg(); }
 		{{
