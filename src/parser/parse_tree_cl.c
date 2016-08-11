@@ -507,6 +507,7 @@ pt_lambda_check_reduce_eq (PARSER_CONTEXT * parser, PT_NODE * tree_or_name, void
 	    case PT_BIT_LENGTH:
 	    case PT_OCTET_LENGTH:
 	    case PT_CHAR_LENGTH:
+	    case PT_PG_COLUMN_SIZE:
 	      *continue_walk = PT_LIST_WALK;	/* don't dive into */
 	      break;
 	    case PT_CAST:
@@ -3451,6 +3452,8 @@ pt_show_binopcode (PT_OP_TYPE n)
       return "bit_length ";
     case PT_CHAR_LENGTH:
       return "char_length ";
+    case PT_PG_COLUMN_SIZE:
+      return "pg_column_size ";
     case PT_IF:
       return "if ";
     case PT_IFNULL:
@@ -10074,7 +10077,12 @@ pt_print_expr (PARSER_CONTEXT * parser, PT_NODE * p)
       q = pt_append_varchar (parser, q, r1);
       q = pt_append_nulstring (parser, q, ")");
       break;
-
+    case PT_PG_COLUMN_SIZE:
+      r1 = pt_print_bytes (parser, p->info.expr.arg1);
+      q = pt_append_nulstring (parser, q, " pg_column_size(");
+      q = pt_append_varchar (parser, q, r1);
+      q = pt_append_nulstring (parser, q, ")");
+      break;
     case PT_LOWER:
       r1 = pt_print_bytes (parser, p->info.expr.arg1);
       q = pt_append_nulstring (parser, q, " lower(");
@@ -17464,6 +17472,7 @@ pt_is_const_expr_node (PT_NODE * node)
 	case PT_FROM_BASE64:
 	case PT_TZ_OFFSET:
 	case PT_CRC32:
+	case PT_PG_COLUMN_SIZE:
 	  return pt_is_const_expr_node (node->info.expr.arg1);
 	case PT_TRIM:
 	case PT_LTRIM:
@@ -18048,6 +18057,7 @@ pt_is_allowed_as_function_index (const PT_NODE * expr)
     case PT_FUNCTION_HOLDER:
     case PT_BIT_LENGTH:
     case PT_OCTET_LENGTH:
+    case PT_PG_COLUMN_SIZE:
     case PT_IFNULL:
     case PT_LOCATE:
     case PT_SUBSTRING:

@@ -496,6 +496,7 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
     case T_TZ_OFFSET:
     case T_SLEEP:
     case T_CRC32:
+    case T_PG_COLUMN_SIZE:
       /* fetch rhs value */
       if (fetch_peek_dbval (thread_p, arithptr->rightptr, vd, NULL, obj_oid, tpl, &peek_right) != NO_ERROR)
 	{
@@ -1219,6 +1220,21 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
 	{
 	  /* must be a char string type */
 	  db_make_int (arithptr->value, 8 * DB_GET_STRING_SIZE (peek_right));
+	}
+      break;
+
+    case T_PG_COLUMN_SIZE:
+      if (DB_IS_NULL (peek_right))
+	{
+	  PRIM_SET_NULL (arithptr->value);
+	}
+      else
+	{
+	  int len = 0;
+
+	  len = pr_data_writeval_disk_size (peek_right);
+
+	  db_make_int (arithptr->value, len);
 	}
       break;
 

@@ -563,6 +563,8 @@ int yybuffer_pos;
 [pP][aA][gG][eE]							{ begin_token(yytext);
 										csql_yylval.cptr = pt_makename(yytext);
 										return PAGE; }
+[pP][gG]_[cC][oO][lL][uU][mM][nN]_[sS][iI][zZ][eE]			{ begin_token(yytext);   
+										return PG_COLUMN_SIZE; }
 [pP][aA][rR][aA][mM][eE][tT][eE][rR][sS]				{ begin_token(yytext);   return PARAMETERS; }
 [pP][aA][rR][tT][iI][aA][lL]						{ begin_token(yytext);   return PARTIAL; }
 [pP][aA][rR][tT][iI][tT][iI][oO][nN]					{ begin_token(yytext);   
