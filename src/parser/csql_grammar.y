@@ -1601,6 +1601,7 @@ int g_original_buffer_len;
 %token <cptr> EUCKR_STRING
 %token <cptr> ISO_STRING
 %token <cptr> UTF8_STRING
+%token <cptr> PG_COLUMN_SIZE
 
 /*}}}*/
 
@@ -15680,6 +15681,16 @@ reserved_func
 			$$ = node;
 			PARSER_SAVE_ERR_CONTEXT ($$, @$.buffer_pos)
         DBG_PRINT}}
+        | PG_COLUMN_SIZE
+		{ push_msg(MSGCAT_SYNTAX_INVALID_PG_COLUMN_SIZE); }
+	  '(' expression_ ')'
+		{ pop_msg(); }
+		{{
+
+			$$ = parser_make_expression (this_parser, PT_PG_COLUMN_SIZE, $4, NULL, NULL);
+			PARSER_SAVE_ERR_CONTEXT ($$, @$.buffer_pos)
+
+		DBG_PRINT}}
 	| INDEX_PREFIX
 		{ push_msg(MSGCAT_SYNTAX_INVALID_INDEX_PREFIX); }
 	  '(' expression_  ',' expression_ ',' expression_ ')'

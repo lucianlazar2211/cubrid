@@ -3126,6 +3126,7 @@ get_opcode_rank (PT_OP_TYPE opcode)
     case PT_SUBSTRING_INDEX:
     case PT_OCTET_LENGTH:
     case PT_BIT_LENGTH:
+    case PT_PG_COLUMN_SIZE:
 
     case PT_CHAR_LENGTH:
     case PT_LOWER:
@@ -3675,6 +3676,7 @@ pt_is_pseudo_const (PT_NODE * expr)
 	case PT_BIN:
 	case PT_TZ_OFFSET:
 	case PT_CRC32:
+	case PT_PG_COLUMN_SIZE:
 	  return pt_is_pseudo_const (expr->info.expr.arg1);
 	case PT_TRIM:
 	case PT_LTRIM:
