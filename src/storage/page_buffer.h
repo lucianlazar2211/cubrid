@@ -232,6 +232,8 @@ struct pgbuf_watcher
 #endif
 };
 
+using pgbuf_aligned_buffer = aligned_memory_buffer < (size_t) IO_MAX_PAGE_SIZE, (size_t) MAX_ALIGNMENT >;
+
 extern HFID *pgbuf_ordered_null_hfid;
 
 extern unsigned int pgbuf_hash_vpid (const void *key_vpid, unsigned int htsize);

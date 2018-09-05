@@ -53,6 +53,7 @@
 #include "fault_injection.h"
 #include "dbtype.h"
 #include "thread_manager.hpp"
+#include "record_descriptor.hpp"
 
 #define BTREE_HEALTH_CHECK
 
@@ -1236,6 +1237,65 @@ const MVCCID BTREE_ONLINE_INDEX_INSERT_FLAG_STATE = 0x400000000000000 | MVCCID_A
 const MVCCID BTREE_ONLINE_INDEX_DELETE_FLAG_STATE = 0x800000000000000 | MVCCID_ALL_VISIBLE;
 const MVCCID BTREE_ONLINE_INDEX_FLAG_MASK = 0xC00000000000000;
 const MVCCID BTREE_ONLINE_INDEX_MVCCID_MASK = ~0xC00000000000000;
+
+//////////////////////////////////////////////////////////////////////////
+//
+//  Start of C++ section
+//
+//////////////////////////////////////////////////////////////////////////
+// *INDENT-OFF*
+
+struct btree_key_location
+{
+  VPID m_vpid;
+  PGSLOTID m_slotid;
+};
+
+class btree_overflow_oids_reader
+{
+public:
+private:
+};
+
+class btree_overflow_key_reader
+{
+public:
+private:
+};
+
+class btree_leaf_record
+{
+public:
+  btree_leaf_record (pgbuf_aligned_buffer & buf)
+    : m_record (buf)
+  {
+    //
+  }
+
+private:
+  record_descriptor m_record;
+};
+
+class btree_key_reader
+{
+public:
+  btree_key_reader (void) = delete;
+
+private:
+
+  // key location
+  btree_key_location m_location;
+  PAGE_PTR m_leaf_page;
+
+  btree_overflow_oids_reader m_overflow_oids;
+};
+
+// *INDENT-ON*
+//////////////////////////////////////////////////////////////////////////
+//
+//  End of C++ section
+//
+//////////////////////////////////////////////////////////////////////////
 
 /*
  * Static functions
@@ -33366,6 +33426,9 @@ btree_online_index_change_state (THREAD_ENTRY * thread_p, BTID_INT * btid_int, R
   int offset_to_insid_mvccid;
   char *oid_ptr = NULL;
   char *mvccid_ptr = NULL;
+
+  pgbuf_aligned_buffer buf;
+  btree_leaf_record leaf_rec (buf);
 
   oid_ptr = record->data + offset_to_object;
 

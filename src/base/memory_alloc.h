@@ -391,6 +391,31 @@ class PRIVATE_UNIQUE_PTR
   private:
     std::unique_ptr <T, PRIVATE_UNIQUE_PTR_DELETER <T> >smart_ptr;
 };
+
+//
+//
+template <size_t S, size_t A>
+class aligned_memory_buffer
+{
+public:
+  static const size_t SIZE = S;
+  static const size_t ALIGNMENT = A;
+
+  aligned_memory_buffer (void)
+  {
+    m_ptr = PTR_ALIGN (m_buf, A);
+  }
+
+  char *get_ptr (void)
+  {
+    return m_ptr;
+  }
+
+private:
+  char m_buf[SIZE + ALIGNMENT];
+  char *m_ptr;
+};
+
 // *INDENT-ON*
 
 #endif /* cplusplus */
