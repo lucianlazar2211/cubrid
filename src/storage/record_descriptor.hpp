@@ -24,6 +24,12 @@
 #include "memory_alloc.h"
 #include "storage_common.h"
 
+// forward definitions
+namespace cubthread
+{
+  class entry;
+};
+
 //  record_descriptor extends functionality for recdes:
 //
 //  typedef struct recdes RECDES;	/* RECORD DESCRIPTOR */
@@ -36,6 +42,12 @@
 //    char *data;			/* The data */
 //  };
 //
+
+enum class record_get_mode
+{
+  PEEK_RECORD = PEEK,
+  COPY_RECORD = COPY
+};
 
 class record_descriptor
 {
@@ -52,6 +64,10 @@ class record_descriptor
 
     // based on recdes
     record_descriptor (const recdes &rec);
+
+    int peek (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid);
+    int copy (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid);
+    int get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid, record_get_mode mode);
 
   private:
     recdes m_recdes;
