@@ -1263,39 +1263,44 @@ public:
 private:
 };
 
+struct btree_leaf_context
+{
+  cubthread::entry *m_thread;
+  BTID_INT *m_btinfo;
+  PAGE_PTR m_page;
+  VPID m_vpid;
+
+  btree_leaf_context (cubthread::entry & thread_p, BTID_INT & info, PAGE_PTR leaf_page);
+};
+
 class btree_leaf_record
 {
 public:
-  btree_leaf_record (cubthread::entry & thread_p, BTID_INT & info, PAGE_PTR leaf_page, PGSLOTID slotid,
-                     pgbuf_aligned_buffer * buffer = NULL);
+  btree_leaf_record (PGSLOTID slotid);
 
-  int read_record (record_get_mode rec_get_mode);
-  int read_record (record_get_mode rec_get_mode, btree_key_value_fetch_mode keymode, db_value * dbval,
-                   bool * clear_value);
+  void set_record_buffer (pgbuf_aligned_buffer & buffer);
+
+  int read_record (btree_leaf_context & leaf_context, record_get_mode rec_get_mode);
+  int read_record (btree_leaf_context & leaf_context, record_get_mode rec_get_mode, btree_key_value_fetch_mode keymode,
+                   db_value * dbval, bool * clear_value);
 
 private:
-  cubthread::entry &m_thread;
-  BTID_INT & m_btinfo;
-  PAGE_PTR m_page;
-  PGSLOTID m_slotid;
 
   record_descriptor m_record;
   leaf_rec m_info;
   int m_offset_after_key;
+  PGSLOTID m_slotid;
 };
 
 class btree_key_reader
 {
 public:
-  btree_key_reader (void) = delete;
+  btree_key_reader (void);
 
 private:
 
-  // key location
-  btree_key_location m_location;
-  PAGE_PTR m_leaf_page;
-
   btree_overflow_oids_reader m_overflow_oids;
+  btree_leaf_record m_leaf_record;
 };
 
 // *INDENT-ON*
@@ -33792,48 +33797,78 @@ btree_find_oid_with_page_and_record (THREAD_ENTRY * thread_p, BTID_INT * btid_in
 //  Start of C++ implementation
 //
 //////////////////////////////////////////////////////////////////////////
+// *INDENT-OFF*
+
+//
+// btree_leaf_context
+//
+btree_leaf_context::btree_leaf_context (cubthread::entry & threadr, BTID_INT & info, PAGE_PTR leaf_page)
+  : m_thread (&threadr)
+  , m_btinfo (&info)
+  , m_page (leaf_page)
+  , m_vpid ()
+{
+  assert (m_page != NULL);
+
+  pgbuf_get_vpid (m_page, &m_vpid);
+}
 
 //
 // btree_leaf_record
 //
 
-btree_leaf_record::btree_leaf_record (cubthread::entry & thread_p, BTID_INT & info, PAGE_PTR leaf_page,
-				      PGSLOTID slotid, pgbuf_aligned_buffer * buffer /*= NULL*/ )
-:m_thread (thread_p), m_btinfo (info), m_page (leaf_page), m_slotid (slotid), m_record (), m_info (),
-m_offset_after_key (0)
+btree_leaf_record::btree_leaf_record (PGSLOTID slotid)
+  : m_record ()
+  , m_info ()
+  , m_offset_after_key (0)
+  , m_slotid (slotid)
 {
-  if (buffer != NULL)
-    {
-      m_record = *buffer;
-    }
+  //
+}
+
+void
+btree_leaf_record::set_record_buffer (pgbuf_aligned_buffer & buffer)
+{
+  // init record based on buffer
+  m_record = buffer;
 }
 
 int
-btree_leaf_record::read_record (record_get_mode rec_get_mode)
+btree_leaf_record::read_record (btree_leaf_context & leaf_context, record_get_mode rec_get_mode)
 {
-  return read_record (rec_get_mode, btree_key_value_fetch_mode::PEEK_KEY_VALUE, NULL, NULL);
+  return read_record (leaf_context, rec_get_mode, btree_key_value_fetch_mode::PEEK_KEY_VALUE, NULL, NULL);
 }
 
 int
-btree_leaf_record::read_record (record_get_mode rec_get_mode, btree_key_value_fetch_mode keymode, db_value * dbval,
-				bool * clear_value)
+btree_leaf_record::read_record (btree_leaf_context & leaf_context, record_get_mode rec_get_mode,
+                                btree_key_value_fetch_mode keymode, db_value * dbval, bool * clear_value)
 {
   int error_code = NO_ERROR;
 
-  error_code = m_record.get (&m_thread, m_page, m_slotid, rec_get_mode);
+  error_code = m_record.get (leaf_context.m_thread, leaf_context.m_page, m_slotid, rec_get_mode);
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
       return error_code;
     }
 
-  error_code = btree_read_record (&m_thread, &m_btinfo, m_page, &m_record, dbval, &m_info, BTREE_LEAF_NODE,
-				  clear_value, &m_offset_after_key, keymode, NULL);
+  error_code = btree_read_record (leaf_context.m_thread, leaf_context.m_btinfo, leaf_context.m_page,
+                                  &m_record, dbval, &m_info, BTREE_LEAF_NODE, clear_value, &m_offset_after_key, keymode,
+                                  NULL);
   if (error_code != NO_ERROR)
+    {
+      ASSERT_ERROR ();
+      return error_code;
+    }
 
-    return NO_ERROR;
+  return NO_ERROR;
 }
 
+//
+//  btree_key_reader
+//
+
+// *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////
 //
 //  End of C++ implementation
