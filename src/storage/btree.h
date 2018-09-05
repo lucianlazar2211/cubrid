@@ -721,9 +721,9 @@ extern int btree_get_num_visible_from_leaf_and_ovf (THREAD_ENTRY * thread_p, BTI
 extern int btree_write_record (THREAD_ENTRY * thread_p, BTID_INT * btid, void *node_rec, DB_VALUE * key,
 			       BTREE_NODE_TYPE node_type, int key_type, int key_len, bool during_loading,
 			       OID * class_oid, OID * oid, BTREE_MVCC_INFO * mvcc_info, RECDES * rec);
-extern int btree_read_record (THREAD_ENTRY * thread_p, BTID_INT * btid, PAGE_PTR pgptr, RECDES * Rec, DB_VALUE * key,
-			      void *rec_header, BTREE_NODE_TYPE node_type, bool * clear_key, int *offset, int copy,
-			      BTREE_SCAN * bts);
+extern int btree_read_record (THREAD_ENTRY * thread_p, BTID_INT * btid, PAGE_PTR pgptr, const RECDES * Rec,
+			      DB_VALUE * key, void *rec_header, BTREE_NODE_TYPE node_type, bool * clear_key,
+			      int *offset, int copy, BTREE_SCAN * bts);
 extern DB_VALUE_COMPARE_RESULT btree_compare_key (DB_VALUE * key1, DB_VALUE * key2, TP_DOMAIN * key_domain,
 						  int do_coercion, int total_order, int *start_colp);
 extern PERF_PAGE_TYPE btree_get_perf_btree_page_type (THREAD_ENTRY * thread_p, PAGE_PTR page_ptr);

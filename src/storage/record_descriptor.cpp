@@ -24,6 +24,7 @@
 #include "record_descriptor.hpp"
 
 #include "error_code.h"
+#include "slotted_page.h"
 
 //  record_descriptor extends functionality for recdes:
 //
@@ -70,14 +71,23 @@ int
 record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid, record_get_mode mode)
 {
   // no copy or we should have enough memory
-  assert (mode == record_get_mode::PEEK_RECORD || m_recdes.area_size >= spage_get_slot (page, slotid)->record_length);
+  assert (mode == record_get_mode::PEEK_RECORD
+	  || m_recdes.area_size >= (int) spage_get_slot (page, slotid)->record_length);
 
   // no copy or data should not be null
   assert (mode == record_get_mode::PEEK_RECORD || m_recdes.data != NULL);
 
-  if (spage_get_record (thread_p, page, slotid, static_cast<int> (mode)) != S_SUCCESS)
+  if (spage_get_record (thread_p, page, slotid, &m_recdes, static_cast<int> (mode)) != S_SUCCESS)
     {
       assert (false);
       return ER_FAILED;
     }
+
+  return NO_ERROR;
+}
+
+const recdes &
+record_descriptor::get_recdes (void)
+{
+  return m_recdes;
 }

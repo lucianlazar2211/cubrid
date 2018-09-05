@@ -69,6 +69,8 @@ class record_descriptor
     int copy (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid);
     int get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid, record_get_mode mode);
 
+    const recdes &get_recdes (void);
+
   private:
     recdes m_recdes;
 };

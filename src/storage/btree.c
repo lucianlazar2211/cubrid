@@ -1350,7 +1350,7 @@ static void btree_insert_object_ordered_by_oid (THREAD_ENTRY * thread_p, RECDES 
 static int btree_start_overflow_page (THREAD_ENTRY * thread_p, BTID_INT * btid_int, BTREE_OBJECT_INFO * object_info,
 				      VPID * first_overflow_vpid, VPID * near_vpid, VPID * new_vpid,
 				      PAGE_PTR * new_page_ptr);
-static int btree_read_record_without_decompression (THREAD_ENTRY * thread_p, BTID_INT * btid, RECDES * Rec,
+static int btree_read_record_without_decompression (THREAD_ENTRY * thread_p, BTID_INT * btid, const RECDES * Rec,
 						    DB_VALUE * key, void *rec_header, BTREE_NODE_TYPE node_type,
 						    bool * clear_key, int *offset, int copy);
 static PAGE_PTR btree_get_new_page (THREAD_ENTRY * thread_p, BTID_INT * btid, VPID * vpid, VPID * near_vpid);
@@ -1456,7 +1456,7 @@ static int btree_find_oid_from_leaf (THREAD_ENTRY * thread_p, BTID_INT * btid, R
 static int btree_find_oid_from_ovfl (THREAD_ENTRY * thread_p, BTID_INT * btid_int, PAGE_PTR overflow_page, OID * oid,
 				     BTREE_OP_PURPOSE purpose, BTREE_MVCC_INFO * match_mvccinfo, int *offset_to_object,
 				     BTREE_MVCC_INFO * mvcc_info);
-static int btree_leaf_get_vpid_for_overflow_oids (RECDES * rec, VPID * vpid);
+static int btree_leaf_get_vpid_for_overflow_oids (const RECDES * rec, VPID * vpid);
 static int btree_record_get_last_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, RECDES * recp,
 					 BTREE_NODE_TYPE node_type, int after_key_offset, OID * oidp, OID * class_oid,
 					 BTREE_MVCC_INFO * mvcc_info, int *last_oid_mvcc_offset);
@@ -1467,12 +1467,12 @@ static char *btree_leaf_get_nth_oid_ptr (BTID_INT * btid, RECDES * recp, BTREE_N
 					 int n);
 static void btree_leaf_set_flag (RECDES * recp, short record_flag);
 static void btree_leaf_clear_flag (RECDES * recp, short record_flag);
-static short btree_leaf_get_flag (RECDES * recp);
-static bool btree_leaf_is_flaged (RECDES * recp, short record_flag);
+static short btree_leaf_get_flag (const RECDES * recp);
+static bool btree_leaf_is_flaged (const RECDES * recp, short record_flag);
 static void btree_record_object_set_mvcc_flags (char *data, short mvcc_flags);
 static void btree_record_object_clear_mvcc_flags (char *rec_data, short mvcc_flags);
-static INLINE short btree_record_object_get_mvcc_flags (char *data) __attribute__ ((ALWAYS_INLINE));
-static INLINE bool btree_record_object_is_flagged (char *data, short mvcc_flag) __attribute__ ((ALWAYS_INLINE));
+static INLINE short btree_record_object_get_mvcc_flags (const char *data) __attribute__ ((ALWAYS_INLINE));
+static INLINE bool btree_record_object_is_flagged (const char *data, short mvcc_flag) __attribute__ ((ALWAYS_INLINE));
 static void btree_leaf_record_handle_first_overflow (THREAD_ENTRY * thread_p, RECDES * recp, BTID_INT * btid_int,
 						     char **rv_undo_data_ptr, char **rv_redo_data_ptr);
 static int btree_record_get_num_oids (THREAD_ENTRY * thread_p, BTID_INT * btid_int, RECDES * rec, int offset,
@@ -2266,14 +2266,15 @@ exit_on_error:
  *   ovfl_vpid(out):
  */
 static int
-btree_leaf_get_vpid_for_overflow_oids (RECDES * rec, VPID * ovfl_vpid)
+btree_leaf_get_vpid_for_overflow_oids (const RECDES * rec, VPID * ovfl_vpid)
 {
   OR_BUF buf;
   int rc = NO_ERROR;
 
   assert (btree_leaf_is_flaged (rec, BTREE_LEAF_RECORD_OVERFLOW_OIDS));
 
-  or_init (&buf, rec->data + rec->length - DISK_VPID_ALIGNED_SIZE, DISK_VPID_SIZE);
+  // buffer is initialized for read
+  or_init (&buf, CONST_CAST (char *, rec->data + rec->length - DISK_VPID_ALIGNED_SIZE), DISK_VPID_SIZE);
 
   ovfl_vpid->pageid = or_get_int (&buf, &rc);
   if (rc == NO_ERROR)
@@ -3375,7 +3376,7 @@ btree_record_remove_last_object (THREAD_ENTRY * thread_p, BTID_INT * btid, RECDE
  *   recp(in):
  */
 static short
-btree_leaf_get_flag (RECDES * recp)
+btree_leaf_get_flag (const RECDES * recp)
 {
   short slot_id;
 
@@ -3390,7 +3391,7 @@ btree_leaf_get_flag (RECDES * recp)
  *   data(in): pointer to OID into key buffer
  */
 STATIC_INLINE short
-btree_record_object_get_mvcc_flags (char *data)
+btree_record_object_get_mvcc_flags (const char *data)
 {
   short vol_id;
 
@@ -3407,7 +3408,7 @@ btree_record_object_get_mvcc_flags (char *data)
  *   record_flag(in):
  */
 static bool
-btree_leaf_is_flaged (RECDES * recp, short record_flag)
+btree_leaf_is_flaged (const RECDES * recp, short record_flag)
 {
   assert ((short) (record_flag & ~BTREE_LEAF_RECORD_MASK) == 0);
 
@@ -3422,7 +3423,7 @@ btree_leaf_is_flaged (RECDES * recp, short record_flag)
  * mvcc_flag (in) : MVCC flag.
  */
 STATIC_INLINE bool
-btree_record_object_is_flagged (char *rec_data, short mvcc_flag)
+btree_record_object_is_flagged (const char *rec_data, short mvcc_flag)
 {
   assert ((short) (mvcc_flag & ~BTREE_OID_MVCC_FLAGS_MASK) == 0);
 
@@ -4232,7 +4233,7 @@ btree_write_record (THREAD_ENTRY * thread_p, BTID_INT * btid, void *node_rec, DB
  * index_readval() will do the right thing and simply skip the key in this case.
  */
 int
-btree_read_record (THREAD_ENTRY * thread_p, BTID_INT * btid, PAGE_PTR pgptr, RECDES * rec, DB_VALUE * key,
+btree_read_record (THREAD_ENTRY * thread_p, BTID_INT * btid, PAGE_PTR pgptr, const RECDES * rec, DB_VALUE * key,
 		   void *rec_header, BTREE_NODE_TYPE node_type, bool * clear_key, int *offset, int copy_key,
 		   BTREE_SCAN * bts)
 {
@@ -4321,7 +4322,7 @@ btree_read_record (THREAD_ENTRY * thread_p, BTID_INT * btid, PAGE_PTR pgptr, REC
  *
  */
 static int
-btree_read_record_without_decompression (THREAD_ENTRY * thread_p, BTID_INT * btid, RECDES * rec, DB_VALUE * key,
+btree_read_record_without_decompression (THREAD_ENTRY * thread_p, BTID_INT * btid, const RECDES * rec, DB_VALUE * key,
 					 void *rec_header, BTREE_NODE_TYPE node_type, bool * clear_key, int *offset,
 					 int copy_key)
 {
@@ -4355,7 +4356,8 @@ btree_read_record_without_decompression (THREAD_ENTRY * thread_p, BTID_INT * bti
 
   assert (rec_header != NULL);
 
-  or_init (&buf, rec->data, rec->length);
+  // buffer is initialized to read from record; const_cast is safe here
+  or_init (&buf, CONST_CAST (char *, rec->data), rec->length);
 
   /* 
    * Find the beginning position of the key within the record and read
@@ -33853,8 +33855,8 @@ btree_leaf_record::read_record (btree_leaf_context & leaf_context, record_get_mo
     }
 
   error_code = btree_read_record (leaf_context.m_thread, leaf_context.m_btinfo, leaf_context.m_page,
-                                  &m_record, dbval, &m_info, BTREE_LEAF_NODE, clear_value, &m_offset_after_key, keymode,
-                                  NULL);
+                                  &m_record.get_recdes (), dbval, &m_info, BTREE_LEAF_NODE, clear_value,
+                                  &m_offset_after_key, keymode, NULL);
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
