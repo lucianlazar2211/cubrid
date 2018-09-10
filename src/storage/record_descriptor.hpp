@@ -57,6 +57,7 @@ class record_descriptor
 
     // default
     record_descriptor (void);
+    ~record_descriptor (void);
 
     // based on an aligned buffer
     template <size_t S, size_t A>
@@ -73,6 +74,7 @@ class record_descriptor
 
   private:
     recdes m_recdes;
+    char *m_own_data;
 };
 
 //////////////////////////////////////////////////////////////////////////

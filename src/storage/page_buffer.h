@@ -30,10 +30,11 @@
 #include "config.h"
 
 #include "error_manager.h"
-#include "storage_common.h"
 #include "disk_manager.h"
 #include "lock_manager.h"
+#include "memory_alloc.h"
 #include "perf_monitor.h"
+#include "storage_common.h"
 
 #define FREE			true	/* Free page buffer */
 #define DONT_FREE		false	/* Don't free the page buffer */
@@ -232,7 +233,12 @@ struct pgbuf_watcher
 #endif
 };
 
-using pgbuf_aligned_buffer = aligned_memory_buffer < (size_t) IO_MAX_PAGE_SIZE, (size_t) MAX_ALIGNMENT >;
+// *INDENT-OFF*
+// temporary - disable for non-C++; should be fixed by json table patch
+#if defined __cplusplus
+using pgbuf_aligned_buffer = aligned_memory_buffer <(size_t) IO_MAX_PAGE_SIZE, (size_t) MAX_ALIGNMENT>;
+#endif // C++
+// *INDENT-ON*
 
 extern HFID *pgbuf_ordered_null_hfid;
 

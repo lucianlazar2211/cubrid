@@ -24,7 +24,10 @@
 #include "record_descriptor.hpp"
 
 #include "error_code.h"
+#include "memory_alloc.h"
 #include "slotted_page.h"
+
+#include <cstring>
 
 //  record_descriptor extends functionality for recdes:
 //
@@ -45,14 +48,34 @@ record_descriptor::record_descriptor (void)
   m_recdes.length = 0;
   m_recdes.type = REC_HOME;
   m_recdes.data = NULL;
+  m_own_data = NULL;
 }
 
 record_descriptor::record_descriptor (const recdes &rec)
 {
-  m_recdes.area_size = rec.area_size;
-  m_recdes.length = rec.length;
+  // copy content from argument
   m_recdes.type = rec.type;
-  m_recdes.data = rec.data;
+  if (rec.length == 0)
+    {
+      m_recdes.length = 0;
+      m_recdes.area_size = 0;
+      m_recdes.data = NULL;
+    }
+  else
+    {
+      m_recdes.area_size = rec.length;
+      m_recdes.length = m_recdes.area_size;
+      m_own_data = m_recdes.data = (char *) db_private_alloc (NULL, m_recdes.area_size);
+      std::memcpy (m_recdes.data, rec.data, m_recdes.length);
+    }
+}
+
+record_descriptor::~record_descriptor (void)
+{
+  if (m_own_data != NULL)
+    {
+      db_private_free (NULL, m_own_data);
+    }
 }
 
 int
@@ -70,20 +93,41 @@ record_descriptor::copy (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slo
 int
 record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid, record_get_mode mode)
 {
-  // no copy or we should have enough memory
-  assert (mode == record_get_mode::PEEK_RECORD
-	  || m_recdes.area_size >= (int) spage_get_slot (page, slotid)->record_length);
-
-  // no copy or data should not be null
-  assert (mode == record_get_mode::PEEK_RECORD || m_recdes.data != NULL);
-
-  if (spage_get_record (thread_p, page, slotid, &m_recdes, static_cast<int> (mode)) != S_SUCCESS)
+  int mode_to_int = static_cast<int> (mode);
+  SCAN_CODE sc = spage_get_record (thread_p, page, slotid, &m_recdes, mode_to_int);
+  if (sc == S_SUCCESS)
     {
-      assert (false);
-      return ER_FAILED;
+      return NO_ERROR;
     }
 
-  return NO_ERROR;
+  if (sc == S_DOESNT_FIT)
+    {
+      // extend and try again
+      assert (m_recdes.length < 0);
+      assert (mode == record_get_mode::COPY_RECORD);
+
+      size_t required_size = static_cast<size_t> (-m_recdes.length);
+      if (m_own_data == NULL)
+	{
+	  m_own_data = (char *) db_private_alloc (thread_p, required_size);
+	}
+      else
+	{
+	  m_own_data = (char *) db_private_realloc (thread_p, m_own_data, required_size);
+	}
+      m_recdes.data = m_own_data;
+      m_recdes.area_size = (int) required_size;
+
+      sc = spage_get_record (thread_p, page, slotid, &m_recdes, mode_to_int);
+      if (sc == S_SUCCESS)
+	{
+	  return NO_ERROR;
+	}
+    }
+
+  // failed
+  assert (false);
+  return ER_FAILED;
 }
 
 const recdes &
