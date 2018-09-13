@@ -97,6 +97,7 @@ record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slot
   SCAN_CODE sc = spage_get_record (thread_p, page, slotid, &m_recdes, mode_to_int);
   if (sc == S_SUCCESS)
     {
+      update_status_after_get (mode);
       return NO_ERROR;
     }
 
@@ -121,6 +122,7 @@ record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slot
       sc = spage_get_record (thread_p, page, slotid, &m_recdes, mode_to_int);
       if (sc == S_SUCCESS)
 	{
+	  update_status_after_get (mode);
 	  return NO_ERROR;
 	}
     }
@@ -130,8 +132,42 @@ record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slot
   return ER_FAILED;
 }
 
-const recdes &
-record_descriptor::get_recdes (void)
+void
+record_descriptor::update_status_after_get (record_get_mode mode)
 {
+  switch (mode)
+    {
+    case record_get_mode::PEEK_RECORD:
+      m_status = status::PEEKED;
+      break;
+    case record_get_mode::COPY_RECORD:
+      m_status = status::COPIED;
+      break;
+    default:
+      assert (false);
+      m_status = status::INVALID;
+      break;
+    }
+}
+
+const recdes &
+record_descriptor::get_recdes (void) const
+{
+  assert (m_status != status::INVALID);
   return m_recdes;
+}
+
+const char *
+record_descriptor::get_data (void)
+{
+  assert (m_status != status::INVALID);
+  return m_recdes.data;
+}
+
+char *
+record_descriptor::get_data_for_modify (void)
+{
+  // we are not allowed to change peeked records
+  assert (m_status == status::COPIED);
+  return m_recdes.data;
 }

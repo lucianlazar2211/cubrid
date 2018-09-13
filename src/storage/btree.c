@@ -1259,6 +1259,16 @@ struct btree_node_context
   btree_node_context (cubthread::entry & thread_p, BTID_INT & info, PAGE_PTR leaf_page, BTREE_NODE_TYPE node_type);
 };
 
+// btree_record_mapper_function is usually mapped over leaf and overflow records
+//
+// btree_node_context will offer a read only leaf/overflow node context
+// record_descriptor will offer a read only leaf/overflow record
+// stop will tell mapper that stop processing overflow pages
+//
+using btree_record_mapper_function = std::function<int (const btree_node_context &ovf_context,
+  const record_descriptor & record, bool & stop)>;
+using btree_object_mapper_function = std::function<int (const btree_object_info& obj, bool & stop)>;
+
 struct btree_object_search
 {
   // inputs
@@ -1285,6 +1295,8 @@ public:
   int read_record (btree_node_context & leaf_context, record_get_mode rec_get_mode, btree_key_value_fetch_mode keymode,
                    db_value * dbval, bool * clear_value);
 
+  const record_descriptor& get_record (void);
+
 private:
 
   record_descriptor m_record;
@@ -1300,8 +1312,7 @@ public:
   ~btree_overflow_oids_reader ();
 
   // Func must be based on records
-  template <typename Func, typename ... Args>
-  int map_records (PGBUF_LATCH_MODE page_latch, Func && func, Args &&... args);
+  int map_records (PGBUF_LATCH_MODE page_latch, const btree_record_mapper_function & map_func);
 
   void clear_overflow_context (void);
   const btree_node_context& get_node_context () const;
@@ -1330,73 +1341,26 @@ class btree_key_reader
 public:
   btree_key_reader (btree_node_context & context, PGSLOTID slotid);
 
+  // map records (leaf + overflow)
+  int map_records (PGBUF_LATCH_MODE page_latch, const btree_record_mapper_function & map_func);
+
   int read_leaf_record (void);                    // read leaf record
   int search_object (const OID & oid, const btree_mvcc_info & match_mvccinfo, BTREE_OP_PURPOSE purpose,
                      btree_mvcc_info * found_mvccinfo);    // search object
 
 private:
 
-  btree_node_context &m_context;
+  btree_node_context &m_leaf_context;
 
   btree_overflow_oids_reader m_overflow_oids;
   btree_leaf_record m_leaf_record;
+  bool m_is_leaf_read;
 };
 
-template<typename Func, typename ... Args>
-int
-btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
-                          int after_key_offset, Func && func, Args &&... args)
-{
-  OR_BUF buf;
-  BTREE_OBJECT_INFO read_obj;
-  int error_code = NO_ERROR;
-  bool is_first = true;
-  bool stop = false;
-  const char *read_obj_cptr = &read_obj;
+static int btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
+                                     int after_key_offset, const btree_object_mapper_function & map_func);
 
-  assert (node_context_arg.m_node_type == BTREE_LEAF_NODE || node_context_arg.m_node_type == BTREE_OVERFLOW_NODE);
 
-  btree_check_valid_record (&record_arg.get_recdes ());
-
-  BTREE_RECORD_OR_BUF_INIT (buf, const_cast<RECDES *> (&record_arg.get_recdes ()));
-
-  // at least one object
-  while (buf.ptr < buf.endptr)
-    {
-      error_code = btree_or_get_object (&buf, node_context_arg.m_btinfo, node_context_arg.m_node_type, after_key_offset,
-                                        &read_obj.oid, &read_obj.class_oid, &read_obj.mvcc_info);
-      if (error_code != NO_ERROR)
-        {
-          assert (false);
-          return error_code;
-        }
-
-      error_code = func (node_context_arg, *read_obj_cptr, stop, std::forward<Args> (args)...);
-      if (error_code != NO_ERROR)
-        {
-          ASSERT_ERROR ();
-          return error_code;
-        }
-      if (stop)
-        {
-          return NO_ERROR;
-        }
-
-      if (node_context_arg.m_node_type == BTREE_LEAF_NODE && is_first)
-        {
-          // skip key
-          error_code = or_seek (buf, after_key_offset);
-          if (error_code != NO_ERROR)
-            {
-              assert (false);
-              return error_code;
-            }
-          is_first = false;
-        }
-    }
-  assert (buf.ptr == buf.endptr);
-  return NO_ERROR;
-}
 
 // *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////
@@ -33966,6 +33930,13 @@ btree_leaf_record::read_record (btree_node_context & leaf_context, record_get_mo
   return NO_ERROR;
 }
 
+
+const record_descriptor&
+btree_leaf_record::get_record (void)
+{
+  return m_record;
+}
+
 //
 //  btree_overflow_oids_reader
 //
@@ -34054,9 +34025,8 @@ btree_overflow_oids_reader::get_node_context (void) const
   return m_node_context;
 }
 
-template <typename Func, typename ... Args>
 int
-btree_overflow_oids_reader::map_records (PGBUF_LATCH_MODE page_latch, Func && func, Args &&... args)
+btree_overflow_oids_reader::map_records (PGBUF_LATCH_MODE page_latch, const btree_record_mapper_function & map_func)
 {
   bool stop = false;
   int error_code = NO_ERROR;
@@ -34069,8 +34039,7 @@ btree_overflow_oids_reader::map_records (PGBUF_LATCH_MODE page_latch, Func && fu
           return error_code;
         }
 
-      error_code = func (const_cast<const btree_node_context &> (m_node_context),
-                         const_cast<const record_descriptor &> (m_record), stop, std::forward<Args> (args)...);
+      error_code = map_func (m_node_context, m_record, stop);
       if (error_code != NO_ERROR)
         {
           ASSERT_ERROR ();
@@ -34110,12 +34079,92 @@ btree_overflow_oids_reader::find_object_in_record (const btree_node_context & ov
 int
 btree_overflow_oids_reader::search_object (PGBUF_LATCH_MODE page_latch, btree_object_search & searcher)
 {
-  return map_records (page_latch, &btree_overflow_oids_reader::find_object_in_record, searcher);
+  btree_record_mapper_function map_func =
+    std::bind (&btree_overflow_oids_reader::find_object_in_record, std::placeholders::_1, std::placeholders::_2,
+               std::placeholders::_3, searcher);
+  return map_records (page_latch, map_func);
 }
 
 //
 //  btree_key_reader
 //
+int
+btree_key_reader::map_records (PGBUF_LATCH_MODE ovf_page_latch, const btree_record_mapper_function & map_func)
+{
+  bool stop;
+  int error_code = NO_ERROR;
+
+  // first map leaf record
+  read_leaf_record ();    // make sure leaf record is read
+
+  error_code = map_func (m_leaf_context, m_leaf_record.get_record (), stop);
+  if (error_code != NO_ERROR)
+    {
+      ASSERT_ERROR ();
+      return error_code;
+    }
+  if (stop)
+    {
+      return NO_ERROR;
+    }
+
+  return m_overflow_oids.map_records (ovf_page_latch, map_func);
+}
+
+static int
+btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
+                          int after_key_offset, const btree_object_mapper_function & map_func)
+{
+  OR_BUF buf;
+  BTREE_OBJECT_INFO read_obj;
+  int error_code = NO_ERROR;
+  bool is_first = true;
+  bool stop = false;
+
+  assert (node_context_arg.m_node_type == BTREE_LEAF_NODE || node_context_arg.m_node_type == BTREE_OVERFLOW_NODE);
+
+  btree_check_valid_record (node_context_arg.m_thread, node_context_arg.m_btinfo, &record_arg.get_recdes (),
+                            node_context_arg.m_node_type, NULL);
+
+  BTREE_RECORD_OR_BUF_INIT (buf, const_cast<RECDES *> (&record_arg.get_recdes ()));
+
+  // at least one object
+  while (buf.ptr < buf.endptr)
+    {
+      error_code = btree_or_get_object (&buf, node_context_arg.m_btinfo, node_context_arg.m_node_type, after_key_offset,
+                                        &read_obj.oid, &read_obj.class_oid, &read_obj.mvcc_info);
+      if (error_code != NO_ERROR)
+        {
+          assert (false);
+          return error_code;
+        }
+
+      error_code = map_func (read_obj, stop);
+      if (error_code != NO_ERROR)
+        {
+          ASSERT_ERROR ();
+          return error_code;
+        }
+      if (stop)
+        {
+          return NO_ERROR;
+        }
+
+      if (node_context_arg.m_node_type == BTREE_LEAF_NODE && is_first)
+        {
+          // skip key
+          error_code = or_seek (&buf, after_key_offset);
+          if (error_code != NO_ERROR)
+            {
+              assert (false);
+              return error_code;
+            }
+          is_first = false;
+        }
+    }
+  assert (buf.ptr == buf.endptr);
+  return NO_ERROR;
+}
 
 // *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////

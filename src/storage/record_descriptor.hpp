@@ -70,11 +70,24 @@ class record_descriptor
     int copy (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid);
     int get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid, record_get_mode mode);
 
-    const recdes &get_recdes (void);
+    const recdes &get_recdes (void) const;
+
+    const char *get_data (void);
+    char *get_data_for_modify (void);
 
   private:
+
+    enum class status
+    {
+      INVALID,
+      PEEKED,
+      COPIED
+    };
+    void inline update_status_after_get (record_get_mode mode);
+
     recdes m_recdes;
     char *m_own_data;
+    status m_status;
 };
 
 //////////////////////////////////////////////////////////////////////////
