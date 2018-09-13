@@ -1291,9 +1291,9 @@ public:
 
   void set_record_buffer (pgbuf_aligned_buffer & buffer);
 
-  int read_record (btree_node_context & leaf_context, record_get_mode rec_get_mode);
-  int read_record (btree_node_context & leaf_context, record_get_mode rec_get_mode, btree_key_value_fetch_mode keymode,
-                   db_value * dbval, bool * clear_value);
+  int read_record (const btree_node_context & leaf_context, record_get_mode rec_get_mode);
+  int read_record (const btree_node_context & leaf_context, record_get_mode rec_get_mode,
+                   btree_key_value_fetch_mode keymode, db_value * dbval, bool * clear_value);
 
   const record_descriptor& get_record (void);
 
@@ -33900,13 +33900,13 @@ btree_leaf_record::set_record_buffer (pgbuf_aligned_buffer & buffer)
 }
 
 int
-btree_leaf_record::read_record (btree_node_context & leaf_context, record_get_mode rec_get_mode)
+btree_leaf_record::read_record (const btree_node_context & leaf_context, record_get_mode rec_get_mode)
 {
   return read_record (leaf_context, rec_get_mode, btree_key_value_fetch_mode::PEEK_KEY_VALUE, NULL, NULL);
 }
 
 int
-btree_leaf_record::read_record (btree_node_context & leaf_context, record_get_mode rec_get_mode,
+btree_leaf_record::read_record (const btree_node_context & leaf_context, record_get_mode rec_get_mode,
                                 btree_key_value_fetch_mode keymode, db_value * dbval, bool * clear_value)
 {
   int error_code = NO_ERROR;
@@ -33929,7 +33929,6 @@ btree_leaf_record::read_record (btree_node_context & leaf_context, record_get_mo
 
   return NO_ERROR;
 }
-
 
 const record_descriptor&
 btree_leaf_record::get_record (void)
@@ -34095,7 +34094,11 @@ btree_key_reader::map_records (PGBUF_LATCH_MODE ovf_page_latch, const btree_reco
   int error_code = NO_ERROR;
 
   // first map leaf record
-  read_leaf_record ();    // make sure leaf record is read
+  error_code = read_leaf_record ();    // make sure leaf record is read
+  if (error_code != NO_ERROR)
+    {
+      return error_code;
+    }
 
   error_code = map_func (m_leaf_context, m_leaf_record.get_record (), stop);
   if (error_code != NO_ERROR)
@@ -34109,6 +34112,24 @@ btree_key_reader::map_records (PGBUF_LATCH_MODE ovf_page_latch, const btree_reco
     }
 
   return m_overflow_oids.map_records (ovf_page_latch, map_func);
+}
+
+
+int
+btree_key_reader::read_leaf_record (void)
+{
+  if (m_is_leaf_read)
+    {
+      // already read
+      return NO_ERROR;
+    }
+
+  int error_code = m_leaf_record.read_record (m_leaf_context, record_get_mode::PEEK_RECORD);
+  if (error_code != NO_ERROR)
+    {
+      ASSERT_ERROR ();
+    }
+  return error_code;
 }
 
 static int
