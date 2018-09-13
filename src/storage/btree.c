@@ -1256,7 +1256,7 @@ struct btree_node_context
   VPID m_vpid;
   BTREE_NODE_TYPE m_node_type;
 
-  btree_node_context (cubthread::entry & thread_p, BTID_INT & info, PAGE_PTR leaf_page, BTREE_NODE_TYPE node_type);
+  btree_node_context (cubthread::entry & thread_p, BTID_INT & info, PAGE_PTR page, BTREE_NODE_TYPE node_type);
 };
 
 // btree_record_mapper_function is usually mapped over leaf and overflow records
@@ -1267,7 +1267,8 @@ struct btree_node_context
 //
 using btree_record_mapper_function = std::function<int (const btree_node_context &ovf_context,
   const record_descriptor & record, bool & stop)>;
-using btree_object_mapper_function = std::function<int (const btree_object_info& obj, bool & stop)>;
+using btree_object_mapper_function = std::function<int (const btree_object_info& obj, int offset_in_record,
+  bool & stop)>;
 
 struct btree_object_search
 {
@@ -1295,7 +1296,10 @@ public:
   int read_record (const btree_node_context & leaf_context, record_get_mode rec_get_mode,
                    btree_key_value_fetch_mode keymode, db_value * dbval, bool * clear_value);
 
+  int search_object (const btree_node_context & leaf_context, btree_object_search & searcher);
+
   const record_descriptor& get_record (void);
+  const VPID& get_first_overflow_vpid (void);
 
 private:
 
@@ -1309,15 +1313,19 @@ class btree_overflow_oids_reader
 {
 public:
 
+  btree_overflow_oids_reader () = delete;
+  btree_overflow_oids_reader (const btree_node_context & leaf_context);
   ~btree_overflow_oids_reader ();
 
-  // Func must be based on records
+  // map each record in each overflow page
   int map_records (PGBUF_LATCH_MODE page_latch, const btree_record_mapper_function & map_func);
 
   void clear_overflow_context (void);
   const btree_node_context& get_node_context () const;
 
   int search_object (PGBUF_LATCH_MODE page_latch, btree_object_search & searcher);
+
+  void set_overflow_vpid (const VPID & first_vpid);
 
 private:
   static const PGSLOTID HEADER_SLOTID = 0;
@@ -1345,8 +1353,7 @@ public:
   int map_records (PGBUF_LATCH_MODE page_latch, const btree_record_mapper_function & map_func);
 
   int read_leaf_record (void);                    // read leaf record
-  int search_object (const OID & oid, const btree_mvcc_info & match_mvccinfo, BTREE_OP_PURPOSE purpose,
-                     btree_mvcc_info * found_mvccinfo);    // search object
+  int search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_search & searcher);    // search object
 
 private:
 
@@ -1359,8 +1366,6 @@ private:
 
 static int btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
                                      int after_key_offset, const btree_object_mapper_function & map_func);
-
-
 
 // *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////
@@ -1506,7 +1511,7 @@ static int btree_find_oid_and_its_page (THREAD_ENTRY * thread_p, BTID_INT * btid
 					RECDES * leaf_record, LEAF_REC * leaf_rec_info, int after_key_offset,
 					PAGE_PTR * found_page, PAGE_PTR * prev_page, int *offset_to_object,
 					BTREE_MVCC_INFO * object_mvcc_info);
-static int btree_find_oid_does_mvcc_info_match (THREAD_ENTRY * thread_p, BTREE_MVCC_INFO * mvcc_info,
+static int btree_find_oid_does_mvcc_info_match (THREAD_ENTRY * thread_p, const BTREE_MVCC_INFO * mvcc_info,
 						BTREE_OP_PURPOSE purpose, const BTREE_MVCC_INFO * match_mvccinfo,
 						bool * is_match);
 static int btree_find_oid_from_leaf (THREAD_ENTRY * thread_p, BTID_INT * btid, RECDES * leaf_record,
@@ -11260,8 +11265,8 @@ error:
  *	 doesn't have a valid delete MVCCID.
  */
 static int
-btree_find_oid_does_mvcc_info_match (THREAD_ENTRY * thread_p, BTREE_MVCC_INFO * mvcc_info, BTREE_OP_PURPOSE purpose,
-				     const BTREE_MVCC_INFO * match_mvccinfo, bool * is_match)
+btree_find_oid_does_mvcc_info_match (THREAD_ENTRY * thread_p, const BTREE_MVCC_INFO * mvcc_info,
+				     BTREE_OP_PURPOSE purpose, const BTREE_MVCC_INFO * match_mvccinfo, bool * is_match)
 {
   /* Assert expected arguments. */
   assert (mvcc_info != NULL);
@@ -33866,11 +33871,11 @@ btree_find_oid_with_page_and_record (THREAD_ENTRY * thread_p, BTID_INT * btid_in
 //
 // btree_node_context
 //
-btree_node_context::btree_node_context (cubthread::entry & threadr, BTID_INT & info, PAGE_PTR leaf_page,
+btree_node_context::btree_node_context (cubthread::entry & threadr, BTID_INT & info, PAGE_PTR page,
                                         BTREE_NODE_TYPE node_type)
   : m_thread (&threadr)
   , m_btinfo (&info)
-  , m_page (leaf_page)
+  , m_page (page)
   , m_vpid ()
   , m_node_type (node_type)
 {
@@ -33930,15 +33935,59 @@ btree_leaf_record::read_record (const btree_node_context & leaf_context, record_
   return NO_ERROR;
 }
 
+int
+btree_leaf_record::search_object (const btree_node_context & leaf_context, btree_object_search & searcher)
+{
+  btree_object_mapper_function find_match_func =
+    [&] (const btree_object_info& obj, int offset_in_record, bool & stop) -> int
+    {
+      int error_code = btree_find_oid_does_mvcc_info_match (leaf_context.m_thread, &obj.mvcc_info, searcher.m_purpose,
+                                                            &searcher.m_match_mvccinfo, &stop);
+      if (error_code != NO_ERROR)
+        {
+          ASSERT_ERROR ();
+          return error_code;
+        }
+      if (stop)
+        {
+          // this means object was matched
+          searcher.m_node = &leaf_context;
+          searcher.m_found_mvccinfo = obj.mvcc_info;
+          searcher.m_offset = offset_in_record;
+        }
+      else
+        {
+          // it will continue searching
+        }
+      return NO_ERROR;
+    };
+  return btree_map_record_objects (leaf_context, m_record, m_offset_after_key, find_match_func);
+}
+
 const record_descriptor&
 btree_leaf_record::get_record (void)
 {
   return m_record;
 }
 
+const VPID&
+btree_leaf_record::get_first_overflow_vpid (void)
+{
+  return m_info.ovfl;
+}
+
 //
 //  btree_overflow_oids_reader
 //
+
+btree_overflow_oids_reader::btree_overflow_oids_reader (const btree_node_context & leaf_context)
+  : m_node_context (*leaf_context.m_thread, *leaf_context.m_btinfo, NULL, BTREE_OVERFLOW_NODE)
+  , m_record ()
+  , m_first_overflow_vpid VPID_INITIALIZER
+  , m_next_vpid VPID_INITIALIZER
+{
+  //
+}
 
 btree_overflow_oids_reader::~btree_overflow_oids_reader (void)
 {
@@ -34084,6 +34133,12 @@ btree_overflow_oids_reader::search_object (PGBUF_LATCH_MODE page_latch, btree_ob
   return map_records (page_latch, map_func);
 }
 
+void
+btree_overflow_oids_reader::set_overflow_vpid (const VPID & first_vpid)
+{
+  m_first_overflow_vpid = first_vpid;
+}
+
 //
 //  btree_key_reader
 //
@@ -34114,7 +34169,6 @@ btree_key_reader::map_records (PGBUF_LATCH_MODE ovf_page_latch, const btree_reco
   return m_overflow_oids.map_records (ovf_page_latch, map_func);
 }
 
-
 int
 btree_key_reader::read_leaf_record (void)
 {
@@ -34128,8 +34182,46 @@ btree_key_reader::read_leaf_record (void)
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
+      return error_code;
     }
-  return error_code;
+
+  m_overflow_oids.set_overflow_vpid (m_leaf_record.get_first_overflow_vpid ());
+
+  return NO_ERROR;
+}
+
+
+int
+btree_key_reader::search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_search & searcher)
+{
+  int error_code = NO_ERROR;
+
+  // first search leaf record
+  error_code = read_leaf_record ();    // make sure leaf record is read
+  if (error_code != NO_ERROR)
+    {
+      return error_code;
+    }
+  error_code = m_leaf_record.search_object (m_leaf_context, searcher);
+  if (error_code != NO_ERROR)
+    {
+      ASSERT_ERROR ();
+      return error_code;
+    }
+  if (searcher.m_offset != NOT_FOUND)
+    {
+      return NO_ERROR;
+    }
+
+  // not found in leaf... we need to get from overflow
+  error_code = m_overflow_oids.search_object (ovf_latch_mode, searcher);
+  if (error_code != NO_ERROR)
+    {
+      ASSERT_ERROR ();
+      return error_code;
+    }
+
+  return NO_ERROR;
 }
 
 static int
@@ -34160,7 +34252,7 @@ btree_map_record_objects (const btree_node_context & node_context_arg, const rec
           return error_code;
         }
 
-      error_code = map_func (read_obj, stop);
+      error_code = map_func (read_obj, (int) (buf.ptr - buf.buffer), stop);
       if (error_code != NO_ERROR)
         {
           ASSERT_ERROR ();
