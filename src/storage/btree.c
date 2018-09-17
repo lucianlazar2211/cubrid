@@ -1250,7 +1250,7 @@ class btree_key_reader;
 // page context - can be leaf or overflow
 struct btree_node_context
 {
-  mutable cubthread::entry *m_thread;
+  mutable cubthread::entry *m_thread;     // thread is a cache that can be changed
   BTID_INT *m_btinfo;
   PAGE_PTR m_page;
   VPID m_vpid;
@@ -1269,6 +1269,66 @@ using btree_record_mapper_function = std::function<int (const btree_node_context
   const record_descriptor & record, bool & stop)>;
 using btree_object_mapper_function = std::function<int (const btree_object_info& obj, int offset_in_record,
   bool & stop)>;
+
+class btree_logger
+{
+public:
+
+  static const std::size_t KEY_DEFAULT_SIZE = 256;
+  static const std::size_t LOGICAL_UNDO_DEFAULT_SIZE =
+    (std::size_t) (OR_BTID_ALIGNED_SIZE + BTREE_OBJECT_MAX_SIZE + KEY_DEFAULT_SIZE + 2 * MAX_ALIGNMENT);
+  static const std::size_t INCREMENTAL_CHANGES_DEFAULT_SIZE = (std::size_t) BTREE_RV_BUFFER_SIZE;
+
+  using logical_undo_buffer = append_buffer<LOGICAL_UNDO_DEFAULT_SIZE>;
+  using incremental_buffer = append_buffer<INCREMENTAL_CHANGES_DEFAULT_SIZE>;
+
+  enum class type
+  {
+    INVALID,
+    ACTIVE_UNDOREDO,
+    ACTIVE_REDO,
+    COMPENSATE,
+    RUN_POSTPONE
+  };
+
+  btree_logger () = delete;
+  btree_logger (const btree_node_context & node_context, PGSLOTID slotid = 0);
+  btree_logger (const btree_logger& other, const btree_node_context & node_context);
+  ~btree_logger (void);
+
+  void set_active_undoredo (logical_undo_buffer& logical_undo, LOG_RCVINDEX rcvindex);
+  void set_active_redo (void);
+  void set_compensate (const LOG_LSA & compensate_lsa);
+  void set_run_postpone (const LOG_LSA & postpone_lsa);
+  void set_rv_record_change (log_rv_record_change mode);
+
+  void start_sysop (void);
+  void end_sysop (void);
+  void log (void);
+
+  bool is_physical_undo_needed (void) const;
+  void incremental_undo (UINT16 offset, UINT8 undo_size, UINT8 redo_size, const char *undo_data);
+  void incremental_redo (UINT16 offset, UINT8 undo_size, UINT8 redo_size, const char *redo_data);
+  void incremental_undoredo (UINT16 offset, UINT8 undo_size, UINT8 redo_size, const char *undo_data,
+                             const char *redo_data);
+
+private:
+
+  const char * get_buffer_data (const incremental_buffer & buf) const;
+
+  const btree_node_context &m_node_context;
+  log_data_addr m_addr;
+
+  logical_undo_buffer* m_logical_undo_data;
+  incremental_buffer m_undo_data;             // incremental physical undo logging
+  incremental_buffer m_redo_data;             // incremental physical redo logging
+
+  type m_type;
+  LOG_LSA m_reference_lsa;            // used for compensate and run postpone
+  LOG_RCVINDEX m_rcv_index;           // used for active logging
+  unsigned int m_start_sysop_level;
+  unsigned int m_sysop_level;         // system operation level
+};
 
 struct btree_object_search
 {
@@ -1313,6 +1373,9 @@ class btree_overflow_oids_reader
 {
 public:
 
+  static const PGSLOTID HEADER_SLOTID = 0;
+  static const PGSLOTID RECORD_SLOTID = 1;
+
   btree_overflow_oids_reader () = delete;
   btree_overflow_oids_reader (const btree_node_context & leaf_context);
   ~btree_overflow_oids_reader ();
@@ -1328,8 +1391,6 @@ public:
   void set_overflow_vpid (const VPID & first_vpid);
 
 private:
-  static const PGSLOTID HEADER_SLOTID = 0;
-  static const PGSLOTID RECORD_SLOTID = 1;
 
   void iterate_start (void);
   void iterate_next (void);
@@ -34277,6 +34338,207 @@ btree_map_record_objects (const btree_node_context & node_context_arg, const rec
     }
   assert (buf.ptr == buf.endptr);
   return NO_ERROR;
+}
+
+//
+// btree_logger
+//
+
+btree_logger::btree_logger (const btree_node_context & node_context, PGSLOTID slotid /* = 1 */)
+  : m_node_context (node_context)
+{
+  m_addr.vfid = NULL;   // does not matter
+  m_addr.pgptr = node_context.m_page;
+
+  if (m_node_context.m_node_type == BTREE_OVERFLOW_NODE)
+    {
+      // overflow slotid is always btree_overflow_oids_reader::RECORD_SLOTID
+      m_addr.offset = btree_overflow_oids_reader::RECORD_SLOTID;
+      BTREE_RV_SET_OVERFLOW_NODE (&m_addr);
+    }
+  else
+    {
+      m_addr.offset = slotid;
+    }
+  m_start_sysop_level = 0;
+  m_sysop_level = 0;
+
+  assert (!log_is_tran_in_system_op (m_node_context.m_thread));
+}
+
+btree_logger::btree_logger (const btree_logger& other, const btree_node_context & node_context)
+  : m_node_context (node_context)
+{
+  // todo
+}
+
+btree_logger::~btree_logger (void)
+{
+  assert (m_start_sysop_level == m_sysop_level);
+}
+
+void
+btree_logger::set_active_undoredo (logical_undo_buffer& logical_undo, LOG_RCVINDEX rcvindex)
+{
+  m_type = type::ACTIVE_UNDOREDO;
+  m_logical_undo_data = &logical_undo;
+  m_rcv_index = rcvindex;
+}
+
+void
+btree_logger::set_active_redo (void)
+{
+  m_type = type::ACTIVE_REDO;
+}
+
+void
+btree_logger::set_compensate (const LOG_LSA & compensate_lsa)
+{
+  m_type = type::COMPENSATE;
+  m_reference_lsa = compensate_lsa;
+}
+
+void
+btree_logger::set_run_postpone (const LOG_LSA & postpone_lsa)
+{
+  m_type = type::RUN_POSTPONE;
+  m_reference_lsa = postpone_lsa;
+}
+
+void
+btree_logger::set_rv_record_change (log_rv_record_change mode)
+{
+  LOG_RV_RECORD_SET_MODIFY_MODE (&m_addr, mode);
+}
+
+
+void
+btree_logger::start_sysop (void)
+{
+  m_sysop_level++;
+}
+
+void
+btree_logger::end_sysop (void)
+{
+  if (m_sysop_level <= m_start_sysop_level)
+    {
+      assert (false);
+      return;
+    }
+
+  m_sysop_level--;
+  if (m_sysop_level == 0)
+    {
+      // log end sysop; the type of end is determined by type of logging
+      switch (m_type)
+        {
+        case btree_logger::type::INVALID:
+          assert (false);
+          break;
+        case btree_logger::type::ACTIVE_UNDOREDO:
+          log_sysop_end_logical_undo (m_node_context.m_thread, m_rcv_index, NULL,
+                                      (int) m_logical_undo_data->get_size (), m_logical_undo_data->get_data ());
+          break;
+        case btree_logger::type::ACTIVE_REDO:
+          log_sysop_commit (m_node_context.m_thread);
+          break;
+        case btree_logger::type::COMPENSATE:
+          log_sysop_end_logical_compensate (m_node_context.m_thread, &m_reference_lsa);
+          break;
+        case btree_logger::type::RUN_POSTPONE:
+          log_sysop_end_logical_run_postpone (m_node_context.m_thread, &m_reference_lsa);
+          break;
+        default:
+          assert (false);
+          break;
+        }
+    }
+}
+
+void
+btree_logger::log (void)
+{
+  if (m_sysop_level > 0)
+    {
+      log_append_undoredo_data (m_node_context.m_thread, RVBT_RECORD_MODIFY_UNDOREDO, &m_addr,
+                                (int) m_undo_data.get_size (), (int) m_redo_data.get_size (),
+                                get_buffer_data (m_undo_data), get_buffer_data (m_redo_data));
+    }
+  else
+    {
+    switch (m_type)
+      {
+      case btree_logger::type::INVALID:
+        assert (false);
+        break;
+      case btree_logger::type::ACTIVE_UNDOREDO:
+        log_append_undoredo_data (m_node_context.m_thread, m_rcv_index, &m_addr, (int) m_logical_undo_data->get_size (),
+                                  (int) m_redo_data.get_size (), m_logical_undo_data->get_data (),
+                                  get_buffer_data (m_redo_data));
+        break;
+      case btree_logger::type::ACTIVE_REDO:
+        log_append_redo_data (m_node_context.m_thread, RVBT_RECORD_MODIFY_NO_UNDO, &m_addr,
+                              (int) m_redo_data.get_size (), get_buffer_data (m_redo_data));
+        break;
+      case btree_logger::type::COMPENSATE:
+        log_append_compensate_with_undo_nxlsa (m_node_context.m_thread, RVBT_RECORD_MODIFY_COMPENSATE,
+                                               pgbuf_get_vpid_ptr (m_addr.pgptr), m_addr.offset, m_addr.pgptr,
+                                               (int) m_redo_data.get_size (), get_buffer_data (m_redo_data),
+                                               LOG_FIND_CURRENT_TDES (m_node_context.m_thread), &m_reference_lsa);
+        break;
+      case btree_logger::type::RUN_POSTPONE:
+        log_append_run_postpone (m_node_context.m_thread, RVBT_RECORD_MODIFY_NO_UNDO, &m_addr,
+                                 pgbuf_get_vpid_ptr (m_addr.pgptr), (int) m_redo_data.get_size (),
+                                 get_buffer_data (m_redo_data), &m_reference_lsa);
+        break;
+      default:
+        assert (false);
+        break;
+      }
+    }
+}
+
+bool
+btree_logger::is_physical_undo_needed (void) const
+{
+  return m_sysop_level > 0;
+}
+
+void
+btree_logger::incremental_undo (UINT16 offset, UINT8 undo_size, UINT8 redo_size, const char *undo_data)
+{
+  if (!is_physical_undo_needed ())
+    {
+      return;
+    }
+  m_undo_data.append (reinterpret_cast<const char *> (&offset), sizeof (UINT16));
+  m_undo_data.append (reinterpret_cast<const char *> (&redo_size), sizeof (UINT8));
+  m_undo_data.append (reinterpret_cast<const char *> (&undo_size), sizeof (UINT8));
+  m_undo_data.append (undo_data, static_cast <std::size_t> (undo_size));
+}
+
+void
+btree_logger::incremental_redo (UINT16 offset, UINT8 undo_size, UINT8 redo_size, const char *redo_data)
+{
+  m_redo_data.append (reinterpret_cast<const char *> (&offset), sizeof (UINT16));
+  m_redo_data.append (reinterpret_cast<const char *> (&undo_size), sizeof (UINT8));
+  m_redo_data.append (reinterpret_cast<const char *> (&redo_size), sizeof (UINT8));
+  m_redo_data.append (redo_data, static_cast <std::size_t> (redo_size));
+}
+
+void
+btree_logger::incremental_undoredo (UINT16 offset, UINT8 undo_size, UINT8 redo_size, const char *undo_data,
+                                    const char *redo_data)
+{
+  incremental_undo (offset, undo_size, redo_size, undo_data);
+  incremental_redo (offset, undo_size, redo_size, redo_data);
+}
+
+const char *
+btree_logger::get_buffer_data (const incremental_buffer & buf) const
+{
+  return buf.get_size () == 0 ? NULL : buf.get_data ();
 }
 
 // *INDENT-ON*

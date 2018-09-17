@@ -60,8 +60,8 @@ class record_descriptor
     ~record_descriptor (void);
 
     // based on an aligned buffer
-    template <size_t S, size_t A>
-    record_descriptor (aligned_memory_buffer<S, A> &membuf);
+    template <size_t S>
+    record_descriptor (aligned_stack_memory_buffer<S> &membuf);
 
     // based on recdes
     record_descriptor (const recdes &rec);
@@ -94,8 +94,8 @@ class record_descriptor
 // template/inline
 //////////////////////////////////////////////////////////////////////////
 
-template <size_t S, size_t A>
-record_descriptor::record_descriptor (aligned_memory_buffer<S, A> &membuf)
+template <size_t S>
+record_descriptor::record_descriptor (aligned_stack_memory_buffer<S> &membuf)
 {
   m_recdes.area_size = membuf.SIZE;
   m_recdes.length = 0;

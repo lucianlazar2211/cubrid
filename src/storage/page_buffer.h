@@ -236,7 +236,7 @@ struct pgbuf_watcher
 // *INDENT-OFF*
 // temporary - disable for non-C++; should be fixed by json table patch
 #if defined __cplusplus
-using pgbuf_aligned_buffer = aligned_memory_buffer <(size_t) IO_MAX_PAGE_SIZE, (size_t) MAX_ALIGNMENT>;
+using pgbuf_aligned_buffer = aligned_stack_memory_buffer <(size_t) IO_MAX_PAGE_SIZE>;
 #endif // C++
 // *INDENT-ON*
 
