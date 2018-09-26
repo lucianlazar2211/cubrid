@@ -2073,6 +2073,7 @@ extern char log_Name_bg_archive[];
 extern char log_Name_removed_archive[];
 
 #if defined (SERVER_MODE) || defined (SA_MODE)
+#if defined __cplusplus
 enum log_rv_record_change
 {
   LOG_RV_RECORD_INSERT = 0x8000,
@@ -2080,7 +2081,7 @@ enum log_rv_record_change
   LOG_RV_RECORD_UPDATE_ALL = 0xC000,
   LOG_RV_RECORD_UPDATE_PARTIAL = 0x0000
 };
-const log_rv_record_change LOG_RV_RECORD_MODIFY_MASK = static_cast < log_rv_record_change > (0xC000);
+const log_rv_record_change LOG_RV_RECORD_MODIFY_MASK = (log_rv_record_change) (0xC000);
 
 #define LOG_RV_RECORD_IS_INSERT(flags) \
   (((flags) & LOG_RV_RECORD_MODIFY_MASK) == LOG_RV_RECORD_INSERT)
@@ -2096,6 +2097,8 @@ const log_rv_record_change LOG_RV_RECORD_MODIFY_MASK = static_cast < log_rv_reco
 
 #define LOG_RV_RECORD_UPDPARTIAL_ALIGNED_SIZE(new_data_size) \
   (DB_ALIGN (new_data_size + OR_SHORT_SIZE + 2 * OR_BYTE_SIZE, INT_ALIGNMENT))
+
+#endif // c++
 #endif // SERVER_MODE or SA_MODE
 
 /* logging */
