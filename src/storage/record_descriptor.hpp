@@ -43,6 +43,7 @@ namespace cubthread
 //  };
 //
 
+// explicit aliases for PEEK/COPY
 enum class record_get_mode
 {
   PEEK_RECORD = PEEK,
@@ -73,9 +74,18 @@ class record_descriptor
     const recdes &get_recdes (void) const;
 
     const char *get_data (void);
-    char *get_data_for_modify (void);
+    std::size_t get_size (void);
+    char *get_data_for_modify (void);   // try to avoid
+
+    void modify_data (std::size_t offset, std::size_t old_size, std::size_t new_size, const char *new_data);
+    void delete_data (std::size_t offset, std::size_t data_size);
+    void insert_data (std::size_t offset, std::size_t new_size, const char *new_data);
 
   private:
+
+    void move_data (std::size_t dest_offset, std::size_t source_offset);
+    void resize (cubthread::entry *thread_p, std::size_t size, bool copy_data);
+    void check_changes_are_permitted (void);
 
     enum class status
     {

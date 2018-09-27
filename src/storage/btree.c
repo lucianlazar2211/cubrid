@@ -99,238 +99,32 @@
  */
 #define NOT_FOUND -1
 
+typedef unsigned short btree_leafrec_flags_type;
+typedef unsigned short btree_mvcc_flags_type;
+
 /* B'0001 0000 0000 0000' */
-static const short BTREE_LEAF_RECORD_FENCE = 0x1000;
+static const btree_leafrec_flags_type BTREE_LEAF_RECORD_FENCE = 0x1000;
 /* B'0010 0000 0000 0000' */
-static const short BTREE_LEAF_RECORD_OVERFLOW_OIDS = 0x2000;
+static const btree_leafrec_flags_type BTREE_LEAF_RECORD_OVERFLOW_OIDS = 0x2000;
 /* B'0100 0000 0000 0000' */
-static const short BTREE_LEAF_RECORD_OVERFLOW_KEY = 0x4000;
+static const btree_leafrec_flags_type BTREE_LEAF_RECORD_OVERFLOW_KEY = 0x4000;
 /* B'1000 0000 0000 0000' */
-static const short BTREE_LEAF_RECORD_CLASS_OID = 0x8000;
+static const btree_leafrec_flags_type BTREE_LEAF_RECORD_CLASS_OID = 0x8000;
 /* B'1111 0000 0000 0000' */
-static const short BTREE_LEAF_RECORD_MASK = 0xF000;
+static const btree_leafrec_flags_type BTREE_LEAF_RECORD_MASK = 0xF000;
 
 /* B'0100 0000 0000 0000' */
-static const short BTREE_OID_HAS_MVCC_INSID = 0x4000;
+static const btree_mvcc_flags_type BTREE_OID_HAS_MVCC_INSID = 0x4000;
 /* B'1000 0000 0000 0000' */
-static const short BTREE_OID_HAS_MVCC_DELID = 0x8000;
+static const btree_mvcc_flags_type BTREE_OID_HAS_MVCC_DELID = 0x8000;	// suppressed warning
 /* B'1100 0000 0000 0000' */
-static const short BTREE_OID_MVCC_FLAGS_MASK = 0xC000;
+static const btree_mvcc_flags_type BTREE_OID_MVCC_FLAGS_MASK = 0xC000;	// suppressed warning
 
-static const short BTREE_OID_HAS_MVCC_INSID_AND_DELID = BTREE_OID_HAS_MVCC_INSID | BTREE_OID_HAS_MVCC_DELID;
+static const btree_mvcc_flags_type BTREE_OID_HAS_MVCC_INSID_AND_DELID =
+  BTREE_OID_HAS_MVCC_INSID | BTREE_OID_HAS_MVCC_DELID;
 
 /* The maximum number of OID's in a page */
 static const int BTREE_MAX_OID_COUNT = IO_MAX_PAGE_SIZE / OR_OID_SIZE;
-
-/* Clear MVCC flags from object OID */
-static void
-btree_oid_clear_mvcc_flags (OID * oid_ptr)
-{
-  oid_ptr->volid &= ~BTREE_OID_MVCC_FLAGS_MASK;
-}
-
-/* Clear record flags from object OID */
-static void btree_oid_clear_record_flags (OID * oid_ptr)
-{
-  oid_ptr->slotid &= ~BTREE_LEAF_RECORD_MASK;
-}
-
-/* Clear all flags (mvcc & record) from object OID. */
-static void
-btree_oid_clear_all_flags (OID * oid_ptr)
-{
-  btree_oid_clear_mvcc_flags (oid_ptr);
-  btree_oid_clear_record_flags (oid_ptr);
-}
-
-/* Check if MVCC flags are set into b-tree object OID. */
-static bool
-btree_oid_is_mvcc_flag_set (const OID * oid_ptr, short mvcc_flag)
-{
-  return (oid_ptr->volid & mvcc_flag) == (mvcc_flag);
-}
-/* Check if record flags are set into b-tree object OID. */
-static bool
-btree_oid_is_record_flag_set (const OID * oid_ptr, short rec_flag)
-{
-  return (oid_ptr->slotid & rec_flag) == (rec_flag);
-}
-
-/* Set b-tree flags into an OID. */
-static void
-btree_oid_set_mvcc_flag (OID * oid_ptr, short mvcc_flag)
-{
-  oid_ptr->volid |= mvcc_flag;
-}
-static void
-btree_oid_set_record_flag (OID * oid_ptr, short rec_flag)
-{
-  oid_ptr->slotid |= rec_flag;
-}
-
-/* Get b-tree flags from an OID. */
-static short
-btree_oid_get_mvcc_flags (const OID * oid_ptr)
-{
-  return (oid_ptr->volid & BTREE_OID_MVCC_FLAGS_MASK);
-}
-static short
-btree_oid_get_record_flags (const OID * oid_ptr)
-{
-  return (oid_ptr->slotid & BTREE_LEAF_RECORD_MASK);
-}
-
-/* Check MVCC flags in an b-tree MVCC info. */
-static bool
-btree_mvcc_info_has_insid (const BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  return ((mvcc_info->flags & BTREE_OID_HAS_MVCC_INSID) != 0);
-}
-static bool
-btree_mvcc_info_has_delid (const BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  return ((mvcc_info->flags & BTREE_OID_HAS_MVCC_DELID) != 0);
-}
-
-/* CLear MVCC flags in a b-tree MVCC info. */
-static void
-btree_mvcc_info_clear_insid (BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  mvcc_info->flags &= ~BTREE_OID_HAS_MVCC_INSID;
-}
-
-static void
-btree_mvcc_info_clear_delid (BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  mvcc_info->flags &= ~BTREE_OID_HAS_MVCC_DELID;
-}
-
-/* Check if insert MVCCID is valid but not visible to everyone. */
-static bool
-btree_mvcc_info_is_insid_not_all_visible (const BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  return btree_mvcc_info_has_insid (mvcc_info) && MVCCID_IS_NOT_ALL_VISIBLE (mvcc_info->insert_mvccid);
-}
-
-/* Check if delete MVCCID is valid. */
-static bool
-btree_mvcc_info_is_delid_valid (const BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  return btree_mvcc_info_has_delid (mvcc_info) && mvcc_info->delete_mvccid != MVCCID_NULL;
-}
-
-/* Insert MVCCID based on b-tree mvcc info. */
-static MVCCID
-btree_mvcc_info_get_insid (const BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  return btree_mvcc_info_has_insid (mvcc_info) ? (mvcc_info)->insert_mvccid : MVCCID_ALL_VISIBLE;
-}
-
-/* Delete MVCC based on b-tree mvcc info. */
-static MVCCID btree_mvcc_info_get_delid (const BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  return btree_mvcc_info_has_delid (mvcc_info) ? (mvcc_info)->delete_mvccid : MVCCID_NULL;
-}
-
-/* Set b-tree MVCC info as if it has fixed size (it includes both insert and
- * delete MVCCID.
- */
-static void
-btree_mvcc_info_set_fixed_size (BTREE_MVCC_INFO * mvcc_info)
-{
-  assert (mvcc_info != NULL);
-  if (!btree_mvcc_info_has_insid (mvcc_info))
-    {
-      mvcc_info->insert_mvccid = MVCCID_ALL_VISIBLE;
-    }
-  if (!btree_mvcc_info_has_delid (mvcc_info))
-    {
-      mvcc_info->delete_mvccid = MVCCID_NULL;
-    }
-  mvcc_info->flags = BTREE_OID_HAS_MVCC_INSID_AND_DELID;
-}
-
-/* Clear unnecessary flags from b-tree MVCC info. */
-static void
-btree_mvcc_info_clear_fixed_size (BTREE_MVCC_INFO * mvcc_info)
-{
-  if (!btree_mvcc_info_is_insid_not_all_visible (mvcc_info))
-    {
-      btree_mvcc_info_clear_insid (mvcc_info);
-    }
-  if (!btree_mvcc_info_is_delid_valid (mvcc_info))
-    {
-      btree_mvcc_info_clear_delid (mvcc_info);
-    }
-}
-
-/* Set insert MVCCID into b-tree mvcc info. */
-static void
-btree_mvcc_info_set_insid (BTREE_MVCC_INFO * mvcc_info, MVCCID insid)
-{
-  mvcc_info->flags |= BTREE_OID_HAS_MVCC_INSID;
-  mvcc_info->insert_mvccid = insid;
-}
-
-/* Set delete MVCCID into b-tree mvcc info. */
-static void
-btree_mvcc_info_set_delid (BTREE_MVCC_INFO * mvcc_info, MVCCID delid)
-{
-  mvcc_info->flags |= BTREE_OID_HAS_MVCC_DELID;
-  mvcc_info->delete_mvccid = delid;
-}
-
-/* Get an object OID from a b-tree record. If MVCC is enabled, mvcc flags are
- * cleared.
- */
-static void
-btree_or_get_oid (const char * ptr, OID * oid)
-{
-  OR_GET_OID (ptr, oid);
-  btree_oid_clear_mvcc_flags (oid);
-}
-
-/* Initialize OR_BUF to process a b-tree record. */
-static void
-btree_init_or_buf_as_record (OR_BUF & buf, RECDES * btree_rec)
-{
-  int size = btree_rec->length;
-  if (btree_leaf_is_flaged (btree_rec, BTREE_LEAF_RECORD_OVERFLOW_OIDS))
-    {
-      size -= DB_ALIGN (DISK_VPID_SIZE, BTREE_MAX_ALIGN);
-    }
-  OR_BUF_INIT (buf, (btree_rec)->data, size);
-  }
-
-/* Get MVCC size from leaf record flags */
-static int
-btree_get_mvcc_info_size_from_flags (short mvcc_flags)
-{
-  int size = 0;
-  if (mvcc_flags & BTREE_OID_HAS_MVCC_INSID)
-    {
-      size += OR_MVCCID_SIZE;
-    }
-  if (mvcc_flags & BTREE_OID_HAS_MVCC_DELID)
-    {
-      size += OR_MVCCID_SIZE;
-    }
-  return size;
-}
-
-static int
-btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info)
-{
-  return btree_get_mvcc_info_size_from_flags (mvcc_info.flags);
-}
 
 /* Check if page is a valid b-tree leaf node. Usually called after unfix and
  * re-fix without validation.
@@ -1490,6 +1284,8 @@ private:
 
 static int btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
                                      int after_key_offset, const btree_object_mapper_function & map_func);
+static void btree_record_modify (record_descriptor & record, INT16 offset, INT8 old_size, INT8 new_size,
+                                 const char *new_data, btree_logger & logger);
 
 // *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////
@@ -1657,10 +1453,10 @@ static void btree_leaf_set_flag (RECDES * recp, short record_flag);
 static void btree_leaf_clear_flag (RECDES * recp, short record_flag);
 static short btree_leaf_get_flag (const RECDES * recp);
 static bool btree_leaf_is_flaged (const RECDES * recp, short record_flag);
-static void btree_record_object_set_mvcc_flags (char *data, short mvcc_flags);
-static void btree_record_object_clear_mvcc_flags (char *rec_data, short mvcc_flags);
-static INLINE short btree_record_object_get_mvcc_flags (const char *data) __attribute__ ((ALWAYS_INLINE));
-static INLINE bool btree_record_object_is_flagged (const char *data, short mvcc_flag) __attribute__ ((ALWAYS_INLINE));
+static void btree_record_object_set_mvcc_flags (char *data, btree_mvcc_flags_type mvcc_flags);
+static void btree_record_object_clear_mvcc_flags (char *rec_data, btree_mvcc_flags_type mvcc_flags);
+static btree_mvcc_flags_type btree_record_object_get_mvcc_flags (const char *data);
+static bool btree_record_object_is_flagged (const char *data, btree_mvcc_flags_type mvcc_flag);
 static void btree_leaf_record_handle_first_overflow (THREAD_ENTRY * thread_p, RECDES * recp, BTID_INT * btid_int,
 						     char **rv_undo_data_ptr, char **rv_redo_data_ptr);
 static int btree_record_get_num_oids (THREAD_ENTRY * thread_p, BTID_INT * btid_int, RECDES * rec, int offset,
@@ -1738,7 +1534,7 @@ static BTREE_SEARCH btree_key_find_first_visible_row_from_all_ovf (THREAD_ENTRY 
 								   VPID * first_ovfl_vpid, OID * oid, OID * class_oid);
 
 static int btree_or_put_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info);
-static int btree_or_get_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info, short btree_mvcc_flags);
+static int btree_or_get_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info, btree_mvcc_flags_type btree_mvcc_flags);
 static int btree_or_put_object (OR_BUF * buf, BTID_INT * btid_int, BTREE_NODE_TYPE node_type,
 				BTREE_OBJECT_INFO * object_info);
 static int btree_or_get_object (OR_BUF * buf, const BTID_INT * btid_int, BTREE_NODE_TYPE node_type,
@@ -1988,6 +1784,32 @@ static void btree_rv_log_delete_object (THREAD_ENTRY * thread_p, const BTREE_DEL
 static void btree_rv_log_insert_object (THREAD_ENTRY * thread_p, const BTREE_INSERT_HELPER & insert_helper,
 					LOG_DATA_ADDR & addr, int undo_length, int redo_length, const char *undo_data,
 					const char *redo_data);
+
+static void btree_oid_clear_mvcc_flags (OID * oid_ptr);
+static void btree_oid_clear_record_flags (OID * oid_ptr);
+static void btree_oid_clear_all_flags (OID * oid_ptr);
+static bool btree_oid_is_mvcc_flag_set (const OID * oid_ptr, btree_mvcc_flags_type mvcc_flag);
+static bool btree_oid_is_record_flag_set (const OID * oid_ptr, btree_leafrec_flags_type rec_flag);
+static void btree_oid_set_mvcc_flag (OID * oid_ptr, short mvcc_flag);
+static void btree_oid_set_record_flag (OID * oid_ptr, short rec_flag);
+static btree_mvcc_flags_type btree_oid_get_mvcc_flags (const OID * oid_ptr);
+static btree_leafrec_flags_type btree_oid_get_record_flags (const OID * oid_ptr);
+static bool btree_mvcc_info_has_insid (const BTREE_MVCC_INFO * mvcc_info);
+static bool btree_mvcc_info_has_delid (const BTREE_MVCC_INFO * mvcc_info);
+static void btree_mvcc_info_clear_insid (BTREE_MVCC_INFO * mvcc_info);
+static void btree_mvcc_info_clear_delid (BTREE_MVCC_INFO * mvcc_info);
+static bool btree_mvcc_info_is_insid_not_all_visible (const BTREE_MVCC_INFO * mvcc_info);
+static bool btree_mvcc_info_is_delid_valid (const BTREE_MVCC_INFO * mvcc_info);
+static MVCCID btree_mvcc_info_get_insid (const BTREE_MVCC_INFO * mvcc_info);
+static MVCCID btree_mvcc_info_get_delid (const BTREE_MVCC_INFO * mvcc_info);
+static void btree_mvcc_info_set_fixed_size (BTREE_MVCC_INFO * mvcc_info);
+static void btree_mvcc_info_clear_fixed_size (BTREE_MVCC_INFO * mvcc_info);
+static void btree_mvcc_info_set_insid (BTREE_MVCC_INFO * mvcc_info, MVCCID insid);
+static void btree_mvcc_info_set_delid (BTREE_MVCC_INFO * mvcc_info, MVCCID delid);
+static void btree_or_get_oid (const char *ptr, OID * oid);
+static void btree_init_or_buf_as_record (OR_BUF & buf, RECDES * btree_rec);
+static int btree_get_mvcc_info_size_from_flags (btree_mvcc_flags_type mvcc_flags);
+static int btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info);
 
 static inline void btree_online_index_check_state (MVCCID state);
 static inline bool btree_online_index_is_insert_flag_state (MVCCID state);
@@ -3580,7 +3402,7 @@ btree_leaf_get_flag (const RECDES * recp)
  *   return: MVCC flag for key oid
  *   data(in): pointer to OID into key buffer
  */
-STATIC_INLINE short
+static btree_mvcc_flags_type
 btree_record_object_get_mvcc_flags (const char *data)
 {
   short vol_id;
@@ -3612,8 +3434,8 @@ btree_leaf_is_flaged (const RECDES * recp, short record_flag)
  * rec_data (in)  : Pointer to an object in b-tree record.
  * mvcc_flag (in) : MVCC flag.
  */
-STATIC_INLINE bool
-btree_record_object_is_flagged (const char *rec_data, short mvcc_flag)
+bool
+btree_record_object_is_flagged (const char *rec_data, btree_mvcc_flags_type mvcc_flag)
 {
   assert ((short) (mvcc_flag & ~BTREE_OID_MVCC_FLAGS_MASK) == 0);
 
@@ -3646,7 +3468,7 @@ btree_leaf_set_flag (RECDES * recp, short record_flag)
  * mvcc_flags (in) : MVCC flags.
  */
 static void
-btree_record_object_set_mvcc_flags (char *rec_data, short mvcc_flags)
+btree_record_object_set_mvcc_flags (char *rec_data, btree_mvcc_flags_type mvcc_flags)
 {
   short vol_id;
 
@@ -3683,7 +3505,7 @@ btree_leaf_clear_flag (RECDES * recp, short record_flag)
  * mvcc_flags (in) : MVCC flags to clear.
  */
 static void
-btree_record_object_clear_mvcc_flags (char *rec_data, short mvcc_flags)
+btree_record_object_clear_mvcc_flags (char *rec_data, btree_mvcc_flags_type mvcc_flags)
 {
   short vol_id;
 
@@ -19617,15 +19439,17 @@ btree_fix_ovfl_oid_page (THREAD_ENTRY * thread_p, BTID_INT * btid, PAGE_PTR pg_p
 static int
 btree_compare_oid (const void *oid_mem1, const void *oid_mem2)
 {
+  // *INDENT-OFF*
   OID oid1, oid2;
 
-  btree_or_get_oid (oid_mem1, &oid1);
+  btree_or_get_oid (reinterpret_cast<const char *> (oid_mem1), &oid1);
   btree_oid_clear_record_flags (&oid1);
 
-  btree_or_get_oid (oid_mem2, &oid2);
+  btree_or_get_oid (reinterpret_cast<const char *> (oid_mem2), &oid2);
   btree_oid_clear_record_flags (&oid2);
 
   return oid_compare (&oid1, &oid2);
+  // *INDENT-ON*
 }
 #endif /* MIGRATE_90BETA_TO_91 */
 
@@ -21577,7 +21401,7 @@ btree_packed_mvccinfo_size (BTREE_MVCC_INFO * mvcc_info)
  * btree_mvcc_flags (in) : Flags that describe the packed MVCC info.
  */
 static int
-btree_or_get_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info, short btree_mvcc_flags)
+btree_or_get_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info, btree_mvcc_flags_type btree_mvcc_flags)
 {
   int size = btree_get_mvcc_info_size_from_flags (btree_mvcc_flags);
 
@@ -33985,6 +33809,222 @@ btree_find_oid_with_page_and_record (THREAD_ENTRY * thread_p, BTID_INT * btid_in
   return error_code;
 }
 
+/* Clear MVCC flags from object OID */
+static void
+btree_oid_clear_mvcc_flags (OID * oid_ptr)
+{
+  oid_ptr->volid &= ~BTREE_OID_MVCC_FLAGS_MASK;
+}
+
+/* Clear record flags from object OID */
+static void
+btree_oid_clear_record_flags (OID * oid_ptr)
+{
+  oid_ptr->slotid &= ~BTREE_LEAF_RECORD_MASK;
+}
+
+/* Clear all flags (mvcc & record) from object OID. */
+static void
+btree_oid_clear_all_flags (OID * oid_ptr)
+{
+  btree_oid_clear_mvcc_flags (oid_ptr);
+  btree_oid_clear_record_flags (oid_ptr);
+}
+
+/* Check if MVCC flags are set into b-tree object OID. */
+static bool
+btree_oid_is_mvcc_flag_set (const OID * oid_ptr, btree_mvcc_flags_type mvcc_flag)
+{
+  return (oid_ptr->volid & mvcc_flag) == (mvcc_flag);
+}
+
+/* Check if record flags are set into b-tree object OID. */
+static bool
+btree_oid_is_record_flag_set (const OID * oid_ptr, btree_leafrec_flags_type rec_flag)
+{
+  return (oid_ptr->slotid & rec_flag) == (rec_flag);
+}
+
+/* Set b-tree flags into an OID. */
+static void
+btree_oid_set_mvcc_flag (OID * oid_ptr, short mvcc_flag)
+{
+  oid_ptr->volid |= mvcc_flag;
+}
+
+static void
+btree_oid_set_record_flag (OID * oid_ptr, short rec_flag)
+{
+  oid_ptr->slotid |= rec_flag;
+}
+
+/* Get b-tree flags from an OID. */
+static btree_mvcc_flags_type
+btree_oid_get_mvcc_flags (const OID * oid_ptr)
+{
+  return (oid_ptr->volid & BTREE_OID_MVCC_FLAGS_MASK);
+}
+
+static btree_leafrec_flags_type
+btree_oid_get_record_flags (const OID * oid_ptr)
+{
+  return (oid_ptr->slotid & BTREE_LEAF_RECORD_MASK);
+}
+
+/* Check MVCC flags in an b-tree MVCC info. */
+static bool
+btree_mvcc_info_has_insid (const BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  return ((mvcc_info->flags & BTREE_OID_HAS_MVCC_INSID) != 0);
+}
+
+static bool
+btree_mvcc_info_has_delid (const BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  return ((mvcc_info->flags & BTREE_OID_HAS_MVCC_DELID) != 0);
+}
+
+/* CLear MVCC flags in a b-tree MVCC info. */
+static void
+btree_mvcc_info_clear_insid (BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  mvcc_info->flags &= ~BTREE_OID_HAS_MVCC_INSID;
+}
+
+static void
+btree_mvcc_info_clear_delid (BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  mvcc_info->flags &= ~BTREE_OID_HAS_MVCC_DELID;
+}
+
+/* Check if insert MVCCID is valid but not visible to everyone. */
+static bool
+btree_mvcc_info_is_insid_not_all_visible (const BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  return btree_mvcc_info_has_insid (mvcc_info) && MVCCID_IS_NOT_ALL_VISIBLE (mvcc_info->insert_mvccid);
+}
+
+/* Check if delete MVCCID is valid. */
+static bool
+btree_mvcc_info_is_delid_valid (const BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  return btree_mvcc_info_has_delid (mvcc_info) && mvcc_info->delete_mvccid != MVCCID_NULL;
+}
+
+/* Insert MVCCID based on b-tree mvcc info. */
+static MVCCID
+btree_mvcc_info_get_insid (const BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  return btree_mvcc_info_has_insid (mvcc_info) ? (mvcc_info)->insert_mvccid : MVCCID_ALL_VISIBLE;
+}
+
+/* Delete MVCC based on b-tree mvcc info. */
+static MVCCID
+btree_mvcc_info_get_delid (const BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  return btree_mvcc_info_has_delid (mvcc_info) ? (mvcc_info)->delete_mvccid : MVCCID_NULL;
+}
+
+/* Set b-tree MVCC info as if it has fixed size (it includes both insert and
+ * delete MVCCID.
+ */
+static void
+btree_mvcc_info_set_fixed_size (BTREE_MVCC_INFO * mvcc_info)
+{
+  assert (mvcc_info != NULL);
+  if (!btree_mvcc_info_has_insid (mvcc_info))
+    {
+      mvcc_info->insert_mvccid = MVCCID_ALL_VISIBLE;
+    }
+  if (!btree_mvcc_info_has_delid (mvcc_info))
+    {
+      mvcc_info->delete_mvccid = MVCCID_NULL;
+    }
+  mvcc_info->flags = BTREE_OID_HAS_MVCC_INSID_AND_DELID;
+}
+
+/* Clear unnecessary flags from b-tree MVCC info. */
+static void
+btree_mvcc_info_clear_fixed_size (BTREE_MVCC_INFO * mvcc_info)
+{
+  if (!btree_mvcc_info_is_insid_not_all_visible (mvcc_info))
+    {
+      btree_mvcc_info_clear_insid (mvcc_info);
+    }
+  if (!btree_mvcc_info_is_delid_valid (mvcc_info))
+    {
+      btree_mvcc_info_clear_delid (mvcc_info);
+    }
+}
+
+/* Set insert MVCCID into b-tree mvcc info. */
+static void
+btree_mvcc_info_set_insid (BTREE_MVCC_INFO * mvcc_info, MVCCID insid)
+{
+  mvcc_info->flags |= BTREE_OID_HAS_MVCC_INSID;
+  mvcc_info->insert_mvccid = insid;
+}
+
+/* Set delete MVCCID into b-tree mvcc info. */
+static void
+btree_mvcc_info_set_delid (BTREE_MVCC_INFO * mvcc_info, MVCCID delid)
+{
+  mvcc_info->flags |= BTREE_OID_HAS_MVCC_DELID;
+  mvcc_info->delete_mvccid = delid;
+}
+
+/* Get an object OID from a b-tree record. If MVCC is enabled, mvcc flags are
+ * cleared.
+ */
+static void
+btree_or_get_oid (const char *ptr, OID * oid)
+{
+  OR_GET_OID (ptr, oid);
+  btree_oid_clear_mvcc_flags (oid);
+}
+
+/* Initialize OR_BUF to process a b-tree record. */
+static void
+btree_init_or_buf_as_record (OR_BUF & buf, RECDES * btree_rec)
+{
+  int size = btree_rec->length;
+  if (btree_leaf_is_flaged (btree_rec, BTREE_LEAF_RECORD_OVERFLOW_OIDS))
+    {
+      size -= DB_ALIGN (DISK_VPID_SIZE, BTREE_MAX_ALIGN);
+    }
+  OR_BUF_INIT (buf, (btree_rec)->data, size);
+}
+
+/* Get MVCC size from leaf record flags */
+static int
+btree_get_mvcc_info_size_from_flags (btree_mvcc_flags_type mvcc_flags)
+{
+  int size = 0;
+  if (mvcc_flags & BTREE_OID_HAS_MVCC_INSID)
+    {
+      size += OR_MVCCID_SIZE;
+    }
+  if (mvcc_flags & BTREE_OID_HAS_MVCC_DELID)
+    {
+      size += OR_MVCCID_SIZE;
+    }
+  return size;
+}
+
+static int
+btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info)
+{
+  return btree_get_mvcc_info_size_from_flags (mvcc_info.flags);
+}
+
 //////////////////////////////////////////////////////////////////////////
 //
 //  Start of C++ implementation
@@ -34401,6 +34441,14 @@ btree_map_record_objects (const btree_node_context & node_context_arg, const rec
     }
   assert (buf.ptr == buf.endptr);
   return NO_ERROR;
+}
+
+static void
+btree_record_modify (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size, const char *new_data,
+                     btree_logger & logger)
+{
+  logger.incremental_undoredo (offset, old_size, new_size, record.get_data () + offset, new_data);
+  record.modify_data (offset, old_size, new_size, new_data);
 }
 
 //

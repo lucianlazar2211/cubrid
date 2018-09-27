@@ -60,6 +60,8 @@ record_descriptor::record_descriptor (const recdes &rec)
       m_recdes.length = 0;
       m_recdes.area_size = 0;
       m_recdes.data = NULL;
+
+      m_status = status::INVALID;
     }
   else
     {
@@ -67,6 +69,8 @@ record_descriptor::record_descriptor (const recdes &rec)
       m_recdes.length = m_recdes.area_size;
       m_own_data = m_recdes.data = (char *) db_private_alloc (NULL, m_recdes.area_size);
       std::memcpy (m_recdes.data, rec.data, m_recdes.length);
+
+      m_status = status::COPIED;
     }
 }
 
@@ -108,16 +112,7 @@ record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slot
       assert (mode == record_get_mode::COPY_RECORD);
 
       size_t required_size = static_cast<size_t> (-m_recdes.length);
-      if (m_own_data == NULL)
-	{
-	  m_own_data = (char *) db_private_alloc (thread_p, required_size);
-	}
-      else
-	{
-	  m_own_data = (char *) db_private_realloc (thread_p, m_own_data, required_size);
-	}
-      m_recdes.data = m_own_data;
-      m_recdes.area_size = (int) required_size;
+      resize (thread_p, required_size, false);
 
       sc = spage_get_record (thread_p, page, slotid, &m_recdes, mode_to_int);
       if (sc == S_SUCCESS)
@@ -130,6 +125,40 @@ record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slot
   // failed
   assert (false);
   return ER_FAILED;
+}
+
+void
+record_descriptor::resize (cubthread::entry *thread_p, std::size_t required_size, bool copy_data)
+{
+  if (required_size <= m_recdes.area_size)
+    {
+      // resize not required
+      return;
+    }
+
+  if (m_own_data == NULL)
+    {
+      m_own_data = (char *) db_private_alloc (thread_p, static_cast<int> (required_size));
+
+      if (copy_data)
+	{
+	  assert (m_recdes.data != NULL);
+	  std::memcpy (m_own_data, m_recdes.data, m_recdes.length);
+	}
+    }
+  else
+    {
+      m_own_data = (char *) db_private_realloc (thread_p, m_own_data, static_cast<int> (required_size));
+
+      if (copy_data)
+	{
+	  // realloc copied data
+	}
+    }
+
+
+  m_recdes.data = m_own_data;
+  m_recdes.area_size = (int) required_size;
 }
 
 void
@@ -164,10 +193,86 @@ record_descriptor::get_data (void)
   return m_recdes.data;
 }
 
+std::size_t
+record_descriptor::get_size (void)
+{
+  assert (m_status != status::INVALID);
+  assert (m_recdes.length > 0);
+  return static_cast<std::size_t> (m_recdes.length);
+}
+
 char *
 record_descriptor::get_data_for_modify (void)
 {
-  // we are not allowed to change peeked records
-  assert (m_status == status::COPIED);
+  check_changes_are_permitted ();
+
   return m_recdes.data;
+}
+
+void
+record_descriptor::move_data (std::size_t dest_offset, std::size_t source_offset)
+{
+  check_changes_are_permitted ();
+
+  // should replace RECORD_MOVE_DATA
+  if (dest_offset == source_offset)
+    {
+      // no moving
+      return;
+    }
+
+  std::size_t rec_size = get_size ();
+
+  // safe-guard: source offset cannot be outside record
+  assert (rec_size >= source_offset);
+
+  std::size_t memmove_size = rec_size - source_offset;
+  std::size_t new_size = rec_size + dest_offset - source_offset;
+
+  if (dest_offset > source_offset)
+    {
+      // record is being increased; make sure we have enough space
+      resize (NULL, new_size, true);
+    }
+
+  if (memmove_size > 0)
+    {
+      std::memmove (m_recdes.data + dest_offset, m_recdes.data + source_offset, memmove_size);
+    }
+  m_recdes.length = static_cast<int> (new_size);
+}
+
+void
+record_descriptor::modify_data (std::size_t offset, std::size_t old_size, std::size_t new_size, const char *new_data)
+{
+  check_changes_are_permitted ();
+
+  // should replace RECORD_REPLACE_DATA
+  move_data (offset + new_size, offset + old_size);
+  if (new_size > 0)
+    {
+      std::memcpy (m_recdes.data + offset, new_data, new_size);
+    }
+}
+
+void
+record_descriptor::delete_data (std::size_t offset, std::size_t data_size)
+{
+  check_changes_are_permitted ();
+
+  // just move data
+  move_data (offset, offset + data_size);
+}
+
+void
+record_descriptor::insert_data (std::size_t offset, std::size_t new_size, const char *new_data)
+{
+  check_changes_are_permitted ();
+  modify_data (offset, 0, new_size, new_data);
+}
+
+void
+record_descriptor::check_changes_are_permitted (void)
+{
+  assert (m_status == status::COPIED);
 }
