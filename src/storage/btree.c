@@ -1284,8 +1284,11 @@ private:
 
 static int btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
                                      int after_key_offset, const btree_object_mapper_function & map_func);
-static void btree_record_modify (record_descriptor & record, INT16 offset, INT8 old_size, INT8 new_size,
+static void btree_record_modify (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size,
                                  const char *new_data, btree_logger & logger);
+static void btree_record_delete (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger);
+static void btree_record_insert (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
+                                 btree_logger & logger);
 
 // *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////
@@ -34025,6 +34028,29 @@ btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info)
   return btree_get_mvcc_info_size_from_flags (mvcc_info.flags);
 }
 
+static void
+btree_record_modify (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size, const char *new_data,
+		     btree_logger & logger)
+{
+  logger.incremental_undoredo (offset, old_size, new_size, record.get_data () + offset, new_data);
+  record.modify_data (offset, old_size, new_size, new_data);
+}
+
+static void
+btree_record_delete (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger)
+{
+  logger.incremental_undoredo (offset, old_size, 0, record.get_data () + offset, NULL);
+  record.delete_data (offset, old_size);
+}
+
+static void
+btree_record_insert (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
+		     btree_logger & logger)
+{
+  logger.incremental_undoredo (offset, 0, new_size, NULL, new_data);
+  record.insert_data (offset, new_size, new_data);
+}
+
 //////////////////////////////////////////////////////////////////////////
 //
 //  Start of C++ implementation
@@ -34441,14 +34467,6 @@ btree_map_record_objects (const btree_node_context & node_context_arg, const rec
     }
   assert (buf.ptr == buf.endptr);
   return NO_ERROR;
-}
-
-static void
-btree_record_modify (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size, const char *new_data,
-                     btree_logger & logger)
-{
-  logger.incremental_undoredo (offset, old_size, new_size, record.get_data () + offset, new_data);
-  record.modify_data (offset, old_size, new_size, new_data);
 }
 
 //
