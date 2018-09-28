@@ -14590,7 +14590,6 @@ sm_add_constraint (MOP classop, DB_CONSTRAINT_TYPE constraint_type, const char *
   int error = NO_ERROR;
   SM_TEMPLATE *def;
   MOP newmop = NULL;
-  LOCK ex_lock = SCH_M_LOCK;
   bool needs_hierarchy_lock;
 
   if (att_names == NULL)
@@ -14619,8 +14618,6 @@ sm_add_constraint (MOP classop, DB_CONSTRAINT_TYPE constraint_type, const char *
 	{
 	  auth = AU_ALTER;
 	}
-
-      // TODO: secondary index on partition.
 
       def = smt_edit_class_mop (classop, auth);
       if (def == NULL)
@@ -14707,14 +14704,12 @@ sm_add_constraint (MOP classop, DB_CONSTRAINT_TYPE constraint_type, const char *
 	      smt_quit (def);
 	      return error;
 	    }
-
 	  error = sm_update_statistics (newmop, STATS_WITH_SAMPLING);
 	  if (error != NO_ERROR)
 	    {
 	      return error;
 	    }
 
-	  /* Promote the lock for online index. */
 	  def = smt_edit_class_mop (classop, auth);
 	  if (def == NULL)
 	    {

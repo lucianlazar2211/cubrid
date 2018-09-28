@@ -649,9 +649,11 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
 	}
       break;
 
+    case T_JSON_UNQUOTE:
     case T_JSON_TYPE:
     case T_JSON_VALID:
     case T_JSON_DEPTH:
+    case T_JSON_PRETTY:
       if (fetch_peek_dbval (thread_p, arithptr->leftptr, vd, NULL, obj_oid, tpl, &peek_left) != NO_ERROR)
 	{
 	  goto error;
@@ -2644,6 +2646,13 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
 	}
       break;
 
+    case T_JSON_PRETTY:
+      if (qdata_json_pretty_dbval (peek_left, arithptr->value, regu_var->domain) != NO_ERROR)
+	{
+	  goto error;
+	}
+      break;
+
     case T_JSON_EXTRACT:
       if (qdata_json_extract_dbval (peek_left, peek_right, arithptr->value, regu_var->domain) != NO_ERROR)
 	{
@@ -2668,6 +2677,13 @@ fetch_peek_arith (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
 
     case T_JSON_DEPTH:
       if (qdata_json_depth_dbval (peek_left, arithptr->value, regu_var->domain) != NO_ERROR)
+	{
+	  goto error;
+	}
+      break;
+
+    case T_JSON_UNQUOTE:
+      if (qdata_json_unquote_dbval (peek_left, arithptr->value, regu_var->domain) != NO_ERROR)
 	{
 	  goto error;
 	}
@@ -4040,6 +4056,7 @@ fetch_peek_dbval (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
 	    case F_JSON_KEYS:
 	    case F_JSON_REMOVE:
 	    case F_JSON_ARRAY_APPEND:
+	    case F_JSON_ARRAY_INSERT:
 	    case F_JSON_MERGE:
 	    case F_JSON_GET_ALL_PATHS:
 	      {
@@ -4232,6 +4249,7 @@ fetch_peek_dbval (THREAD_ENTRY * thread_p, REGU_VARIABLE * regu_var, VAL_DESCR *
 	case F_JSON_KEYS:
 	case F_JSON_REMOVE:
 	case F_JSON_ARRAY_APPEND:
+	case F_JSON_ARRAY_INSERT:
 	case F_JSON_MERGE:
 	case F_JSON_GET_ALL_PATHS:
 	  break;
