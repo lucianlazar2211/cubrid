@@ -70,7 +70,7 @@ record_descriptor::record_descriptor (const recdes &rec)
       m_own_data = m_recdes.data = (char *) db_private_alloc (NULL, m_recdes.area_size);
       std::memcpy (m_recdes.data, rec.data, m_recdes.length);
 
-      m_status = status::COPIED;
+      m_status = status::COPIED;  // we assume this is a copied record
     }
 }
 
@@ -187,14 +187,14 @@ record_descriptor::get_recdes (void) const
 }
 
 const char *
-record_descriptor::get_data (void)
+record_descriptor::get_data (void) const
 {
   assert (m_status != status::INVALID);
   return m_recdes.data;
 }
 
 std::size_t
-record_descriptor::get_size (void)
+record_descriptor::get_size (void) const
 {
   assert (m_status != status::INVALID);
   assert (m_recdes.length > 0);
@@ -272,7 +272,7 @@ record_descriptor::insert_data (std::size_t offset, std::size_t new_size, const 
 }
 
 void
-record_descriptor::check_changes_are_permitted (void)
+record_descriptor::check_changes_are_permitted (void) const
 {
-  assert (m_status == status::COPIED);
+  assert (m_status == status::COPIED || m_status == status::NEW);
 }

@@ -44,14 +44,12 @@ namespace cubpacking
   class packer
   {
     public:
-      /* method for starting a packing context */
-      packer (void)
-      {
-	m_ptr = NULL;
-      };
-      packer (char *storage, const size_t amount);
 
-      int init (char *storage, const size_t amount);
+
+      packer ();
+
+      void init_for_packing (char *storage, const size_t amount);
+      void init_for_unpacking (const char *storage, const size_t amount);
 
       size_t get_packed_int_size (size_t curr_offset);
       int pack_int (const int value);
@@ -59,7 +57,7 @@ namespace cubpacking
       int peek_unpack_int (int *value);
 
       size_t get_packed_short_size (size_t curr_offset);
-      int pack_short (short *value);
+      int pack_short (const short *value);
       int unpack_short (short *value);
 
       size_t get_packed_bigint_size (size_t curr_offset);
@@ -97,12 +95,19 @@ namespace cubpacking
 
       const char *get_curr_ptr (void)
       {
-	return m_ptr;
+	return m_type == type::PACK ? m_write_ptr : m_read_ptr;
       };
 
       void align (const size_t req_alignment)
       {
-	m_ptr = PTR_ALIGN (m_ptr, req_alignment);
+	if (m_type == type::PACK)
+	  {
+	    m_write_ptr = PTR_ALIGN (m_write_ptr, req_alignment);
+	  }
+	else
+	  {
+	    m_read_ptr = PTR_ALIGN (m_read_ptr, req_alignment);
+	  }
       };
 
       const char *get_packer_buffer (void)
@@ -116,11 +121,22 @@ namespace cubpacking
       };
 
     private:
-      char *m_packer_start_ptr; /* start of buffer */
-      char *m_ptr;         /* current pointer of serialization */
-      char *m_end_ptr;     /* end of available serialization scope */
+      enum class type
+      {
+	INVALID,
+	PACK,
+	UNPACK
+      };
+
+      type m_type;
+      const char *m_packer_start_ptr; /* start of buffer */
+      const char *m_end_ptr;     /* end of available serialization scope */
+      const char *m_read_ptr;
+      char *m_write_ptr;
   };
 
 } /* namespace cubpacking */
+
+using packing_packer = cubpacking::packer;    // for legacy C files, because indent is confused by namespaces
 
 #endif /* _PACKER_HPP_ */

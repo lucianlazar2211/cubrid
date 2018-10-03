@@ -89,7 +89,7 @@ namespace cubreplication
     public:
       stream_entry (cubstream::multi_thread_stream *stream_p)
 	: entry (stream_p),
-	  m_serializator (NULL, 0)
+	  m_serializator ()
       {
       };
 
@@ -97,7 +97,7 @@ namespace cubreplication
 		    MVCCID arg_mvccid,
 		    stream_entry_header::TRAN_STATE state)
 	: entry (stream_p),
-	  m_serializator (NULL, 0)
+	  m_serializator ()
       {
 	m_header.mvccid = arg_mvccid;
 	m_header.tran_state = state;

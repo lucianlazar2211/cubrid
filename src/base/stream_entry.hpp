@@ -84,7 +84,7 @@ namespace cubstream
 	cubpacking::packer *serializator = get_packer ();
 
 	size_t aligned_amount = DB_ALIGN (reserved_amount, MAX_ALIGNMENT);
-	serializator->init (ptr, aligned_amount);
+	serializator->init_for_packing (ptr, aligned_amount);
 
 	pack_stream_entry_header ();
 
@@ -125,7 +125,7 @@ namespace cubstream
 
 	assert (header_size == get_packed_header_size ());
 
-	serializator->init (ptr, header_size);
+	serializator->init_for_unpacking (ptr, header_size);
 
 	error_code = unpack_stream_entry_header ();
 	if (error_code != NO_ERROR)
@@ -157,7 +157,7 @@ namespace cubstream
 	cubpacking::packer *serializator = get_packer ();
 	size_t count_packable_entries = get_packable_entry_count_from_header ();
 
-	serializator->init (ptr, data_size);
+	serializator->init_for_unpacking (ptr, data_size);
 
 	for (i = 0 ; i < count_packable_entries; i++)
 	  {

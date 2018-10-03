@@ -73,25 +73,26 @@ class record_descriptor
 
     const recdes &get_recdes (void) const;
 
-    const char *get_data (void);
-    std::size_t get_size (void);
+    const char *get_data (void) const;
+    std::size_t get_size (void) const;
     char *get_data_for_modify (void);   // try to avoid
 
     void modify_data (std::size_t offset, std::size_t old_size, std::size_t new_size, const char *new_data);
     void delete_data (std::size_t offset, std::size_t data_size);
     void insert_data (std::size_t offset, std::size_t new_size, const char *new_data);
+    void move_data (std::size_t dest_offset, std::size_t source_offset);
 
   private:
 
-    void move_data (std::size_t dest_offset, std::size_t source_offset);
     void resize (cubthread::entry *thread_p, std::size_t size, bool copy_data);
-    void check_changes_are_permitted (void);
+    void check_changes_are_permitted (void) const;
 
     enum class status
     {
       INVALID,
       PEEKED,
-      COPIED
+      COPIED,
+      NEW
     };
     void inline update_status_after_get (record_get_mode mode);
 
@@ -110,5 +111,7 @@ record_descriptor::record_descriptor (aligned_stack_memory_buffer<S> &membuf)
   m_recdes.area_size = membuf.SIZE;
   m_recdes.length = 0;
   m_recdes.type = REC_HOME;
-  m_recdes.data = NULL;
+  m_recdes.data = membuf.get_ptr ();
+  m_own_data = NULL;
+  m_status = status::NEW;
 }

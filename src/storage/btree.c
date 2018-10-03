@@ -54,6 +54,7 @@
 #include "dbtype.h"
 #include "thread_manager.hpp"
 #include "record_descriptor.hpp"
+#include "packer.hpp"
 
 #define BTREE_HEALTH_CHECK
 
@@ -1119,7 +1120,7 @@ struct btree_helper
 //////////////////////////////////////////////////////////////////////////
 // *INDENT-OFF*
 
-class btree_key_reader;
+class btree_key_context;
 
 // page context - can be leaf or overflow
 struct btree_node_context
@@ -1131,6 +1132,10 @@ struct btree_node_context
   BTREE_NODE_TYPE m_node_type;
 
   btree_node_context (cubthread::entry & thread_p, BTID_INT & info, PAGE_PTR page, BTREE_NODE_TYPE node_type);
+
+  bool is_leaf (void) const;
+  bool is_overflow (void) const;
+  bool is_unique (void) const;
 };
 
 // btree_record_mapper_function is usually mapped over leaf and overflow records
@@ -1139,7 +1144,7 @@ struct btree_node_context
 // record_descriptor will offer a read only leaf/overflow record
 // stop will tell mapper that stop processing overflow pages
 //
-using btree_record_mapper_function = std::function<int (const btree_node_context &ovf_context,
+using btree_record_mapper_function = std::function<int (const btree_node_context &node_context,
   const record_descriptor & record, bool & stop)>;
 using btree_object_mapper_function = std::function<int (const btree_object_info& obj, int offset_in_record,
   bool & stop)>;
@@ -1204,10 +1209,24 @@ private:
   unsigned int m_sysop_level;         // system operation level
 };
 
+struct btree_object_location
+{
+  const btree_key_context& m_key_context;
+  const btree_node_context *m_node;
+  const record_descriptor *m_record;
+  size_t m_offset_in_record;
+
+  btree_object_location ();
+
+  bool is_first_of_leaf () const;
+  bool is_fixed_size () const;
+  bool is_class_packing_required (const OID & class_oid) const;
+};
+
 struct btree_object_search
 {
   // inputs
-  btree_key_reader& m_key_reader;
+  btree_key_context& m_key_reader;
   const OID& oid;
   const btree_mvcc_info& m_match_mvccinfo;
   BTREE_OP_PURPOSE m_purpose;
@@ -1230,10 +1249,10 @@ public:
   int read_record (const btree_node_context & leaf_context, record_get_mode rec_get_mode,
                    btree_key_value_fetch_mode keymode, db_value * dbval, bool * clear_value);
 
-  int search_object (const btree_node_context & leaf_context, btree_object_search & searcher);
+  int search_object (const btree_node_context & leaf_context, btree_object_search & searcher) const;
 
-  const record_descriptor& get_record (void);
-  const VPID& get_first_overflow_vpid (void);
+  const record_descriptor& get_record (void) const;
+  const VPID& get_first_overflow_vpid (void) const;
 
 private:
 
@@ -1279,16 +1298,18 @@ private:
   VPID m_next_vpid;
 };
 
-class btree_key_reader
+class btree_key_context
 {
 public:
-  btree_key_reader (btree_node_context & context, PGSLOTID slotid);
+  btree_key_context (btree_node_context & context, PGSLOTID slotid);
 
   // map records (leaf + overflow)
   int map_records (PGBUF_LATCH_MODE page_latch, const btree_record_mapper_function & map_func);
 
   int read_leaf_record (void);                    // read leaf record
   int search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_search & searcher);    // search object
+
+  bool has_overflow_oids () const;
 
 private:
 
@@ -1301,11 +1322,11 @@ private:
 
 static int btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
                                      int after_key_offset, const btree_object_mapper_function & map_func);
-static void btree_record_modify (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size,
+static void btree_record_modify_data (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size,
                                  const char *new_data, btree_logger & logger);
-static void btree_record_delete (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger);
-static void btree_record_insert (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
-                                 btree_logger & logger);
+static void btree_record_delete_data (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger);
+static void btree_record_insert_data (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
+                                      btree_logger & logger);
 
 // *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////
@@ -1553,10 +1574,10 @@ static BTREE_SEARCH btree_key_find_first_visible_row (THREAD_ENTRY * thread_p, B
 static BTREE_SEARCH btree_key_find_first_visible_row_from_all_ovf (THREAD_ENTRY * thread_p, BTID_INT * btid_int,
 								   VPID * first_ovfl_vpid, OID * oid, OID * class_oid);
 
-static int btree_or_put_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info);
+static int btree_or_put_mvccinfo (OR_BUF * buf, const BTREE_MVCC_INFO * mvcc_info);
 static int btree_or_get_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info, btree_mvcc_flags_type btree_mvcc_flags);
 static int btree_or_put_object (OR_BUF * buf, BTID_INT * btid_int, BTREE_NODE_TYPE node_type,
-				BTREE_OBJECT_INFO * object_info);
+				const BTREE_OBJECT_INFO * object_info);
 static int btree_or_get_object (OR_BUF * buf, const BTID_INT * btid_int, BTREE_NODE_TYPE node_type,
 				int after_key_offset, OID * oid, OID * class_oid, BTREE_MVCC_INFO * mvcc_info);
 static char *btree_unpack_object (char *ptr, BTID_INT * btid_int, BTREE_NODE_TYPE node_type, RECDES * record,
@@ -1828,8 +1849,12 @@ static void btree_mvcc_info_set_insid (BTREE_MVCC_INFO * mvcc_info, MVCCID insid
 static void btree_mvcc_info_set_delid (BTREE_MVCC_INFO * mvcc_info, MVCCID delid);
 static void btree_or_get_oid (const char *ptr, OID * oid);
 static void btree_init_or_buf_as_record (OR_BUF & buf, RECDES * btree_rec);
+// record to packer functions may be useful for a larger scope than b-tree
+static void btree_record_get_read_packer (const record_descriptor & record, packing_packer & read_packer);
+static void btree_record_get_write_packer (record_descriptor & record, packing_packer & write_packer);
 static int btree_get_mvcc_info_size_from_flags (btree_mvcc_flags_type mvcc_flags);
-static int btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info);
+static size_t btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info);
+static size_t btree_object_info_get_disk_size (const BTREE_OBJECT_INFO & obj_info);
 
 static inline void btree_online_index_check_state (MVCCID state);
 static inline bool btree_online_index_is_insert_flag_state (MVCCID state);
@@ -21467,7 +21492,7 @@ btree_or_get_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info, btree_mvcc_fla
  * mvcc_info (in) : MVCC info (saved as record header).
  */
 static int
-btree_or_put_mvccinfo (OR_BUF * buf, BTREE_MVCC_INFO * mvcc_info)
+btree_or_put_mvccinfo (OR_BUF * buf, const BTREE_MVCC_INFO * mvcc_info)
 {
   int error_code = NO_ERROR;
 
@@ -21662,7 +21687,8 @@ btree_or_get_object (OR_BUF * buf, const BTID_INT * btid_int, BTREE_NODE_TYPE no
  * NOTE: Buffer will point at the end of packed object after execution.
  */
 static int
-btree_or_put_object (OR_BUF * buf, BTID_INT * btid_int, BTREE_NODE_TYPE node_type, BTREE_OBJECT_INFO * object_info)
+btree_or_put_object (OR_BUF * buf, BTID_INT * btid_int, BTREE_NODE_TYPE node_type,
+		     const BTREE_OBJECT_INFO * object_info)
 {
   bool is_first_of_leaf;	/* True if object is first in a leaf record. */
   OID flagged_oid;		/* OID of object including flags. */
@@ -34960,30 +34986,36 @@ btree_get_mvcc_info_size_from_flags (btree_mvcc_flags_type mvcc_flags)
   return size;
 }
 
-static int
+static size_t
 btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info)
 {
-  return btree_get_mvcc_info_size_from_flags (mvcc_info.flags);
+  return static_cast < size_t > (btree_get_mvcc_info_size_from_flags (mvcc_info.flags));
+}
+
+static size_t
+btree_object_info_get_disk_size (const BTREE_OBJECT_INFO & obj_info)
+{
+  return OR_OID_SIZE + btree_mvcc_info_get_disk_size (obj_info.mvcc_info);
 }
 
 static void
-btree_record_modify (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size, const char *new_data,
-		     btree_logger & logger)
+btree_record_modify_data (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size,
+			  const char *new_data, btree_logger & logger)
 {
   logger.incremental_undoredo (offset, old_size, new_size, record.get_data () + offset, new_data);
   record.modify_data (offset, old_size, new_size, new_data);
 }
 
 static void
-btree_record_delete (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger)
+btree_record_delete_data (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger)
 {
   logger.incremental_undoredo (offset, old_size, 0, record.get_data () + offset, NULL);
   record.delete_data (offset, old_size);
 }
 
 static void
-btree_record_insert (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
-		     btree_logger & logger)
+btree_record_insert_data (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
+			  btree_logger & logger)
 {
   logger.incremental_undoredo (offset, 0, new_size, NULL, new_data);
   record.insert_data (offset, new_size, new_data);
@@ -34997,6 +35029,259 @@ btree_record_insert (record_descriptor & record, UINT16 offset, UINT8 new_size, 
 // *INDENT-OFF*
 
 //
+// function implementations
+//
+
+static int
+btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
+                          int after_key_offset, const btree_object_mapper_function & map_func)
+{
+  OR_BUF buf;
+  BTREE_OBJECT_INFO read_obj;
+  int error_code = NO_ERROR;
+  bool is_first = true;
+  bool stop = false;
+
+  assert (node_context_arg.m_node_type == BTREE_LEAF_NODE || node_context_arg.m_node_type == BTREE_OVERFLOW_NODE);
+
+  btree_check_valid_record (node_context_arg.m_thread, node_context_arg.m_btinfo, &record_arg.get_recdes (),
+                            node_context_arg.m_node_type, NULL);
+
+  btree_init_or_buf_as_record (buf, const_cast<RECDES *> (&record_arg.get_recdes ()));
+
+  // at least one object
+  while (buf.ptr < buf.endptr)
+    {
+      error_code = btree_or_get_object (&buf, node_context_arg.m_btinfo, node_context_arg.m_node_type, after_key_offset,
+                                        &read_obj.oid, &read_obj.class_oid, &read_obj.mvcc_info);
+      if (error_code != NO_ERROR)
+        {
+          assert (false);
+          return error_code;
+        }
+
+      error_code = map_func (read_obj, (int) (buf.ptr - buf.buffer), stop);
+      if (error_code != NO_ERROR)
+        {
+          ASSERT_ERROR ();
+          return error_code;
+        }
+      if (stop)
+        {
+          return NO_ERROR;
+        }
+
+      if (node_context_arg.m_node_type == BTREE_LEAF_NODE && is_first)
+        {
+          // skip key
+          error_code = or_seek (&buf, after_key_offset);
+          if (error_code != NO_ERROR)
+            {
+              assert (false);
+              return error_code;
+            }
+          is_first = false;
+        }
+    }
+  assert (buf.ptr == buf.endptr);
+  return NO_ERROR;
+}
+
+static size_t
+btree_record_get_object_count (const btree_node_context & node_context, const record_descriptor & record,
+                               int offset_after_key /* = 0 */)
+{
+  size_t count = 0;
+  if (node_context.is_leaf ())
+    {
+      assert (offset_after_key > 0);
+
+      // create lambda function to count objects
+      btree_object_mapper_function mapfunc =
+        [&] (const btree_object_info& obj, int offset_in_record, bool & stop) -> int
+        {
+          ++count;
+          return NO_ERROR;
+        };
+      (void) btree_map_record_objects (node_context, record, offset_after_key, mapfunc);
+    }
+  else
+    {
+      // overflow
+      // all objects are fixed size
+      count = record.get_size () / static_cast<size_t> (BTREE_OBJECT_FIXED_SIZE (node_context.m_btinfo));
+    }
+
+  assert (count > 0);
+  return count;
+}
+
+static size_t
+btree_get_max_object_count_in_record (const btree_node_context & node_context)
+{
+  if (node_context.is_leaf ())
+    {
+      return BTREE_MAX_OIDCOUNT_IN_LEAF_RECORD (node_context.m_btinfo);
+    }
+  else
+    {
+      return BTREE_MAX_OIDCOUNT_IN_OVERFLOW_RECORD (node_context.m_btinfo);
+    }
+}
+
+static bool
+btree_record_can_append_object (const btree_node_context & node_context, const record_descriptor & record,
+                                int offset_after_key /* = 0 */)
+{
+  size_t current_count = btree_record_get_object_count (node_context, record, offset_after_key);
+  size_t max_count = btree_get_max_object_count_in_record (node_context);
+  
+  return current_count < max_count;
+}
+
+static void
+btree_record_insert_object (const btree_object_info & object, const btree_object_location & location,
+                            record_descriptor & record, btree_logger & logger)
+{
+  // todo: update object info with location here? fixed/unfixed
+  packing_packer packer;
+
+  size_t packed_size = btree_object_info_get_disk_size (object);
+
+  char *pack_ptr = record.get_data_for_modify () + location.m_offset_in_record;
+
+  // make room
+  record.move_data (location.m_offset_in_record + packed_size, location.m_offset_in_record);
+
+  packer.init_for_packing (pack_ptr, packed_size);
+  
+}
+
+static void
+btree_object_adjust_flags_for_location (const btree_object_location & location, btree_object_info & object)
+{
+  if (location.is_fixed_size ())
+    {
+      btree_mvcc_info_set_fixed_size (&object.mvcc_info);
+    }
+  else
+    {
+      btree_mvcc_info_clear_fixed_size (&object.mvcc_info);
+    }
+}
+
+static void
+btree_packer_pack_mvccid (packing_packer & packer, MVCCID mvccid)
+{
+  packer.pack_bigint (&mvccid);
+}
+
+static void
+btree_packer_unpack_mvccid (packing_packer & packer, MVCCID & mvccid)
+{
+  packer.unpack_bigint (&mvccid);
+}
+
+static void
+btree_packer_pack_oid (packing_packer & packer, const OID & oid)
+{
+  packer.pack_int (oid.pageid);
+  packer.pack_short (&oid.slotid);
+  packer.pack_short (&oid.volid);
+}
+
+static void
+btree_packer_unpack_oid (packing_packer & packer, OID & oid)
+{
+  packer.unpack_int (&oid.pageid);
+  packer.unpack_short (&oid.slotid);
+  packer.unpack_short (&oid.volid);
+}
+
+static void
+btree_packer_pack_object (packing_packer & packer, const btree_object_location & location, btree_object_info & object)
+{
+  OID oid_with_flags = object.oid;
+
+  btree_object_adjust_flags_for_location (location, object);
+
+  // first pack object
+  // set mvcc flags
+  btree_oid_set_mvcc_flag (&oid_with_flags, object.mvcc_info.flags);
+  if (location.is_first_of_leaf () && location.is_class_packing_required (object.class_oid))
+    {
+      // oid must be flagged
+      oid_with_flags.slotid |= BTREE_LEAF_RECORD_CLASS_OID;
+    }
+  btree_packer_pack_oid (packer, oid_with_flags);
+
+  if (location.is_class_packing_required (object.class_oid))
+    {
+      // pack class OID
+      btree_packer_pack_oid (packer, object.class_oid);
+    }
+
+  // now pack mvcc info
+  if (btree_mvcc_info_has_insid (&object.mvcc_info))
+    {
+      packer.pack_bigint (&object.mvcc_info.insert_mvccid);
+    }
+  if (btree_mvcc_info_has_delid (&object.mvcc_info))
+    {
+      packer.pack_bigint (&object.mvcc_info.delete_mvccid);
+    }
+}
+
+static void
+btree_packer_unpack_object (packing_packer & packer, const btree_object_location & location,
+                            btree_object_info & object)
+{
+  object.mvcc_info.flags = btree_record_object_get_mvcc_flags (packer.get_curr_ptr ());
+
+  // get OID
+  btree_packer_unpack_oid (packer, object.oid);
+
+  if (location.m_node->is_unique ())
+    {
+      // maybe class oid should be unpacked
+      if (location.is_fixed_size()
+          || (location.is_first_of_leaf () && btree_oid_is_record_flag_set(&object.oid, BTREE_LEAF_RECORD_CLASS_OID)))
+        {
+          // class oid is packed
+          btree_packer_unpack_oid (packer, object.class_oid);
+        }
+      else
+        {
+          // class is top class
+          assert (location.is_first_of_leaf ());
+          object.class_oid = location.m_node->m_btinfo->topclass_oid;
+        }
+    }
+
+  // now unpack mvcc info
+  if (btree_mvcc_info_has_insid (&object.mvcc_info))
+    {
+      packer.unpack_bigint (&object.mvcc_info.insert_mvccid);
+    }
+  if (btree_mvcc_info_has_delid (&object.mvcc_info))
+    {
+      packer.unpack_bigint (&object.mvcc_info.delete_mvccid);
+    }
+}
+
+static void
+btree_record_get_read_packer (const record_descriptor & record, packing_packer & read_packer)
+{
+  read_packer.init_for_unpacking (record.get_data (), record.get_size ());
+}
+
+static void
+btree_record_get_write_packer (record_descriptor & record, packing_packer & write_packer)
+{
+  write_packer.init_for_packing (record.get_data_for_modify (), record.get_size ());
+}
+
+//
 // btree_node_context
 //
 btree_node_context::btree_node_context (cubthread::entry & threadr, BTID_INT & info, PAGE_PTR page,
@@ -35008,8 +35293,27 @@ btree_node_context::btree_node_context (cubthread::entry & threadr, BTID_INT & i
   , m_node_type (node_type)
 {
   assert (m_page != NULL);
+  assert (m_node_type == BTREE_LEAF_NODE || m_node_type == BTREE_OVERFLOW_NODE);
 
   pgbuf_get_vpid (m_page, &m_vpid);
+}
+
+bool
+btree_node_context::is_leaf (void) const
+{
+  return m_node_type == BTREE_LEAF_NODE;
+}
+
+bool
+btree_node_context::is_overflow (void) const
+{
+  return m_node_type == BTREE_OVERFLOW_NODE;
+}
+
+bool
+btree_node_context::is_unique (void) const
+{
+  return BTREE_IS_UNIQUE (m_btinfo->unique_pk);
 }
 
 //
@@ -35064,7 +35368,7 @@ btree_leaf_record::read_record (const btree_node_context & leaf_context, record_
 }
 
 int
-btree_leaf_record::search_object (const btree_node_context & leaf_context, btree_object_search & searcher)
+btree_leaf_record::search_object (const btree_node_context & leaf_context, btree_object_search & searcher) const
 {
   btree_object_mapper_function find_match_func =
     [&] (const btree_object_info& obj, int offset_in_record, bool & stop) -> int
@@ -35093,13 +35397,13 @@ btree_leaf_record::search_object (const btree_node_context & leaf_context, btree
 }
 
 const record_descriptor&
-btree_leaf_record::get_record (void)
+btree_leaf_record::get_record (void) const
 {
   return m_record;
 }
 
 const VPID&
-btree_leaf_record::get_first_overflow_vpid (void)
+btree_leaf_record::get_first_overflow_vpid (void) const
 {
   return m_info.ovfl;
 }
@@ -35268,10 +35572,10 @@ btree_overflow_oids_reader::set_overflow_vpid (const VPID & first_vpid)
 }
 
 //
-//  btree_key_reader
+//  btree_key_context
 //
 int
-btree_key_reader::map_records (PGBUF_LATCH_MODE ovf_page_latch, const btree_record_mapper_function & map_func)
+btree_key_context::map_records (PGBUF_LATCH_MODE ovf_page_latch, const btree_record_mapper_function & map_func)
 {
   bool stop;
   int error_code = NO_ERROR;
@@ -35298,7 +35602,7 @@ btree_key_reader::map_records (PGBUF_LATCH_MODE ovf_page_latch, const btree_reco
 }
 
 int
-btree_key_reader::read_leaf_record (void)
+btree_key_context::read_leaf_record (void)
 {
   if (m_is_leaf_read)
     {
@@ -35320,7 +35624,7 @@ btree_key_reader::read_leaf_record (void)
 
 
 int
-btree_key_reader::search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_search & searcher)
+btree_key_context::search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_search & searcher)
 {
   int error_code = NO_ERROR;
 
@@ -35352,59 +35656,12 @@ btree_key_reader::search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_s
   return NO_ERROR;
 }
 
-static int
-btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
-                          int after_key_offset, const btree_object_mapper_function & map_func)
+bool
+btree_key_context::has_overflow_oids () const
 {
-  OR_BUF buf;
-  BTREE_OBJECT_INFO read_obj;
-  int error_code = NO_ERROR;
-  bool is_first = true;
-  bool stop = false;
+  assert (m_is_leaf_read);
 
-  assert (node_context_arg.m_node_type == BTREE_LEAF_NODE || node_context_arg.m_node_type == BTREE_OVERFLOW_NODE);
-
-  btree_check_valid_record (node_context_arg.m_thread, node_context_arg.m_btinfo, &record_arg.get_recdes (),
-                            node_context_arg.m_node_type, NULL);
-
-  btree_init_or_buf_as_record (buf, const_cast<RECDES *> (&record_arg.get_recdes ()));
-
-  // at least one object
-  while (buf.ptr < buf.endptr)
-    {
-      error_code = btree_or_get_object (&buf, node_context_arg.m_btinfo, node_context_arg.m_node_type, after_key_offset,
-                                        &read_obj.oid, &read_obj.class_oid, &read_obj.mvcc_info);
-      if (error_code != NO_ERROR)
-        {
-          assert (false);
-          return error_code;
-        }
-
-      error_code = map_func (read_obj, (int) (buf.ptr - buf.buffer), stop);
-      if (error_code != NO_ERROR)
-        {
-          ASSERT_ERROR ();
-          return error_code;
-        }
-      if (stop)
-        {
-          return NO_ERROR;
-        }
-
-      if (node_context_arg.m_node_type == BTREE_LEAF_NODE && is_first)
-        {
-          // skip key
-          error_code = or_seek (&buf, after_key_offset);
-          if (error_code != NO_ERROR)
-            {
-              assert (false);
-              return error_code;
-            }
-          is_first = false;
-        }
-    }
-  assert (buf.ptr == buf.endptr);
-  return NO_ERROR;
+  return !VPID_ISNULL (&m_leaf_record.get_first_overflow_vpid ());
 }
 
 //
@@ -35606,6 +35863,61 @@ const char *
 btree_logger::get_buffer_data (const incremental_buffer & buf) const
 {
   return buf.get_size () == 0 ? NULL : buf.get_data ();
+}
+
+//
+// btree_object_location
+//
+
+bool
+btree_object_location::is_first_of_leaf () const
+{
+  return m_node->is_leaf () && m_offset_in_record == 0;
+}
+
+bool
+btree_object_location::is_fixed_size () const
+{
+  // all overflow objects are fixed size
+  if (m_node->is_overflow ())
+    {
+      return true;
+    }
+
+  // leaf node:
+
+  // in unique key leaf, all except first are fixed size
+  if (m_node->is_unique () && m_offset_in_record != 0)
+    {
+      return true;
+    }
+
+  // if key has overflow oids, first object in leaf is fixed size
+  if (m_key_context.has_overflow_oids () && m_offset_in_record == 0)
+    {
+      return true;
+    }
+
+  // if none of the above, object does not have fixed size
+  return false;
+}
+
+bool
+btree_object_location::is_class_packing_required (const OID & class_oid) const
+{
+  if (!m_node->is_unique ())
+    {
+      return false;
+    }
+  if (is_fixed_size ())
+    {
+      return true;
+    }
+  if (!OID_EQ (&class_oid, &m_node->m_btinfo->topclass_oid))
+    {
+      return true;
+    }
+  return false;
 }
 
 // *INDENT-ON*
