@@ -296,8 +296,11 @@ namespace test_packing
     ptr2 = new char[buf_size];
     mem::pinnable_buffer buf1 (ptr1, buf_size);
     mem::pinnable_buffer buf2 (ptr2, buf_size);
-    cubpacking::packer packer_instance (buf1.get_buffer (), buf1.get_buffer_size ());
-    cubpacking::packer unpacker_instance (buf2.get_buffer (), buf2.get_buffer_size ());
+    cubpacking::packer packer_instance;
+    cubpacking::packer unpacker_instance;
+
+    packer_instance.init_for_packing (buf1.get_buffer (), buf1.get_buffer_size ());
+    unpacker_instance.init_for_unpacking (buf2.get_buffer (), buf2.get_buffer_size ());
 
     obj_size = 0;
     for (i = 0; i < TEST_OBJ_CNT; i++)
