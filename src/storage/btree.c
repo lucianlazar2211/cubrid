@@ -1854,7 +1854,8 @@ static void btree_record_get_read_packer (const record_descriptor & record, pack
 static void btree_record_get_write_packer (record_descriptor & record, packing_packer & write_packer);
 static int btree_get_mvcc_info_size_from_flags (btree_mvcc_flags_type mvcc_flags);
 static size_t btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info);
-static size_t btree_object_info_get_disk_size (const BTREE_OBJECT_INFO & obj_info);
+static size_t btree_object_info_get_disk_size (const btree_object_location & location,
+					       const BTREE_OBJECT_INFO & obj_info);
 
 static inline void btree_online_index_check_state (MVCCID state);
 static inline bool btree_online_index_is_insert_flag_state (MVCCID state);
@@ -34989,13 +34990,16 @@ btree_get_mvcc_info_size_from_flags (btree_mvcc_flags_type mvcc_flags)
 static size_t
 btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info)
 {
-  return static_cast < size_t > (btree_get_mvcc_info_size_from_flags (mvcc_info.flags));
+  return STATIC_CAST (size_t, btree_get_mvcc_info_size_from_flags (mvcc_info.flags));
 }
 
 static size_t
-btree_object_info_get_disk_size (const BTREE_OBJECT_INFO & obj_info)
+btree_object_info_get_disk_size (const btree_object_location & location, const BTREE_OBJECT_INFO & obj_info)
 {
-  return OR_OID_SIZE + btree_mvcc_info_get_disk_size (obj_info.mvcc_info);
+  size_t size = (size_t) OR_OID_SIZE;
+  size += location.is_class_packing_required (obj_info.class_oid);
+  size += btree_mvcc_info_get_disk_size (obj_info.mvcc_info);
+  return size;
 }
 
 static void
@@ -35139,22 +35143,33 @@ btree_record_can_append_object (const btree_node_context & node_context, const r
   return current_count < max_count;
 }
 
-static void
-btree_record_insert_object (const btree_object_info & object, const btree_object_location & location,
-                            record_descriptor & record, btree_logger & logger)
+static size_t
+btree_packed_object_size (const btree_object_location & location, const char *packed_ptr)
 {
-  // todo: update object info with location here? fixed/unfixed
-  packing_packer packer;
+  // instance OID is always packed
+  size_t packed_size = (size_t) OR_OID_SIZE;
 
-  size_t packed_size = btree_object_info_get_disk_size (object);
+  // sometimes class OID is packed. index must be unique and:
+  //
+  //   1. object is not first in leaf record or
+  //   2. object is flagged having class OID packed
+  if (location.m_node->is_unique ())
+    {
+      if (!location.is_first_of_leaf ())
+        {
+          packed_size += (size_t) OR_OID_SIZE;
+        }
+      else
+        {
+          if (((OR_GET_SHORT (packed_ptr + OR_OID_SLOTID)) | BTREE_LEAF_RECORD_CLASS_OID) != 0)
+            {
+              packed_size += (size_t) OR_OID_SIZE;
+            }
+        }
+    }
 
-  char *pack_ptr = record.get_data_for_modify () + location.m_offset_in_record;
-
-  // make room
-  record.move_data (location.m_offset_in_record + packed_size, location.m_offset_in_record);
-
-  packer.init_for_packing (pack_ptr, packed_size);
-  
+  // mvcc info size
+  packed_size += btree_get_mvcc_info_size_from_flags (btree_record_object_get_mvcc_flags (packed_ptr));
 }
 
 static void
@@ -35203,8 +35218,6 @@ btree_packer_pack_object (packing_packer & packer, const btree_object_location &
 {
   OID oid_with_flags = object.oid;
 
-  btree_object_adjust_flags_for_location (location, object);
-
   // first pack object
   // set mvcc flags
   btree_oid_set_mvcc_flag (&oid_with_flags, object.mvcc_info.flags);
@@ -35244,8 +35257,7 @@ btree_packer_unpack_object (packing_packer & packer, const btree_object_location
   if (location.m_node->is_unique ())
     {
       // maybe class oid should be unpacked
-      if (location.is_fixed_size()
-          || (location.is_first_of_leaf () && btree_oid_is_record_flag_set(&object.oid, BTREE_LEAF_RECORD_CLASS_OID)))
+      if (!location.is_first_of_leaf () || btree_oid_is_record_flag_set (&object.oid, BTREE_LEAF_RECORD_CLASS_OID))
         {
           // class oid is packed
           btree_packer_unpack_oid (packer, object.class_oid);
@@ -35257,6 +35269,9 @@ btree_packer_unpack_object (packing_packer & packer, const btree_object_location
           object.class_oid = location.m_node->m_btinfo->topclass_oid;
         }
     }
+
+  // clear all flags
+  btree_oid_clear_all_flags (&object.oid);
 
   // now unpack mvcc info
   if (btree_mvcc_info_has_insid (&object.mvcc_info))
@@ -35279,6 +35294,66 @@ static void
 btree_record_get_write_packer (record_descriptor & record, packing_packer & write_packer)
 {
   write_packer.init_for_packing (record.get_data_for_modify (), record.get_size ());
+}
+
+static void
+btree_record_insert_object (record_descriptor & record, const btree_object_location & location,
+                            btree_object_info & object, btree_logger & logger)
+{
+  packing_packer packer;
+
+  btree_object_adjust_flags_for_location (location, object);
+
+  size_t packed_size = btree_object_info_get_disk_size (location, object);
+
+  char *pack_ptr = record.get_data_for_modify () + location.m_offset_in_record;
+
+  // make room
+  record.move_data (location.m_offset_in_record + packed_size, location.m_offset_in_record);
+
+  packer.init_for_packing (pack_ptr, packed_size);
+  btree_packer_pack_object (packer, location, object);
+
+  logger.incremental_undoredo (location.m_offset_in_record, 0, packed_size, NULL, pack_ptr);
+}
+
+static void
+btree_record_delete_object (record_descriptor & record, const btree_object_location & location, btree_logger & logger)
+{
+  // cannot delete first object in leaf record
+  assert (!location.is_first_of_leaf ());
+
+  char *ptr = record.get_data_for_modify () + location.m_offset_in_record;
+  btree_mvcc_flags_type mvcc_flags = btree_record_object_get_mvcc_flags (ptr);
+
+  size_t packed_size = OR_OID_SIZE;
+  if (location.m_node->is_unique ())
+    {
+      packed_size += OR_OID_SIZE;
+    }
+  packed_size += STATIC_CAST (size_t, btree_get_mvcc_info_size_from_flags (packed_size));
+
+  logger.incremental_undoredo (location.m_offset_in_record, packed_size, 0, ptr, NULL);
+  record.delete_data (location.m_offset_in_record, packed_size);
+}
+
+static void
+btree_record_replace_object (record_descriptor & record, const btree_object_location & location,
+                             btree_object_info object, btree_logger & logger)
+{
+  aligned_stack_memory_buffer<BTREE_OBJECT_MAX_SIZE> membuf;
+  packing_packer packer;
+
+  btree_object_adjust_flags_for_location (location, object);
+
+  size_t new_packed_size = btree_object_info_get_disk_size (location, object);
+  packer.init_for_packing (membuf.get_ptr (), new_packed_size);
+  btree_packer_pack_object (packer, location, object);
+
+  char *ptr = record.get_data_for_modify () + location.m_offset_in_record;
+  size_t old_packed_size = btree_packed_object_size (location, ptr);
+  logger.incremental_undoredo (location.m_offset_in_record, old_packed_size, new_packed_size, ptr, membuf.get_ptr ());
+  record.modify_data (location.m_offset_in_record, old_packed_size, new_packed_size, membuf.get_ptr ());
 }
 
 //
