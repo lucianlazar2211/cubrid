@@ -63,6 +63,7 @@ class record_descriptor
     // based on an aligned buffer
     template <size_t S>
     record_descriptor (aligned_stack_memory_buffer<S> &membuf);
+    record_descriptor (const char *data, size_t size);
 
     // based on recdes
     record_descriptor (const recdes &rec);
@@ -92,7 +93,8 @@ class record_descriptor
       INVALID,
       PEEKED,
       COPIED,
-      NEW
+      NEW,
+      IMMUTABLE
     };
     void inline update_status_after_get (record_get_mode mode);
 

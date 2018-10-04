@@ -164,7 +164,7 @@ namespace cubpacking
   }
 
   int
-  packer::pack_bigint (std::int64_t *value)
+  packer::pack_bigint (const std::int64_t *value)
   {
     assert (m_type == type::PACK);
     align (MAX_ALIGNMENT);
@@ -189,7 +189,7 @@ namespace cubpacking
   }
 
   int
-  packer::pack_bigint (std::uint64_t *value)
+  packer::pack_bigint (const std::uint64_t *value)
   {
     assert (m_type == type::PACK);
     align (MAX_ALIGNMENT);
@@ -600,6 +600,24 @@ namespace cubpacking
     align (INT_ALIGNMENT);
 
     return NO_ERROR;
+  }
+
+  void
+  packer::assign_or_buf (const size_t size, or_buf &buf)
+  {
+    if (m_type == type::PACK)
+      {
+	check_range (m_write_ptr, m_end_ptr, size);
+	m_write_ptr += size;
+	OR_BUF_INIT (buf, m_write_ptr, size);
+      }
+    else
+      {
+	check_range (m_read_ptr, m_end_ptr, size);
+	m_read_ptr += size;
+	// promise you won't write on it!
+	OR_BUF_INIT (buf, const_cast <char *> (m_read_ptr), size);
+      }
   }
 
 } /* namespace cubpacking */

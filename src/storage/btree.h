@@ -82,9 +82,11 @@ typedef enum
 #define BTREE_IS_UNIQUE(unique_pk)  ((unique_pk) & BTREE_CONSTRAINT_UNIQUE)
 #define BTREE_IS_PART_KEY_DESC(btid_int) ((btid_int)->part_key_desc != 0)
 
-
-#define BTREE_NORMAL_KEY 0
-#define BTREE_OVERFLOW_KEY 1
+enum btree_key_type
+{
+  BTREE_NORMAL_KEY = 0,
+  BTREE_OVERFLOW_KEY = 1
+};
 
 #define BTREE_SET_UNIQUE_VIOLATION_ERROR(THREAD,KEY,OID,C_OID,BTID,BTNM) \
 		btree_set_error(THREAD, KEY, OID, C_OID, BTID, BTNM, \

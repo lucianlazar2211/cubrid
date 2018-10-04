@@ -9875,7 +9875,7 @@ pr_data_writeval_disk_size (DB_VALUE * value)
  * Note:
  */
 int
-pr_index_writeval_disk_size (DB_VALUE * value)
+pr_index_writeval_disk_size (const DB_VALUE * value)
 {
   PR_TYPE *type;
   DB_TYPE dbval_type;
@@ -9895,7 +9895,8 @@ pr_index_writeval_disk_size (DB_VALUE * value)
 	}
       else
 	{
-	  return (*(type->index_lengthval)) (value);
+	  // todo - fix index_lengthval signature
+	  return (*(type->index_lengthval)) (CONST_CAST (DB_VALUE *, value));
 	}
     }
 

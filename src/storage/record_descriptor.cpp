@@ -49,22 +49,16 @@ record_descriptor::record_descriptor (void)
   m_recdes.type = REC_HOME;
   m_recdes.data = NULL;
   m_own_data = NULL;
+  m_status = status::INVALID;
 }
 
 record_descriptor::record_descriptor (const recdes &rec)
+  : record_descriptor ()
 {
-  // copy content from argument
   m_recdes.type = rec.type;
-  if (rec.length == 0)
+  if (rec.length != 0)
     {
-      m_recdes.length = 0;
-      m_recdes.area_size = 0;
-      m_recdes.data = NULL;
-
-      m_status = status::INVALID;
-    }
-  else
-    {
+      // copy content from argument
       m_recdes.area_size = rec.length;
       m_recdes.length = m_recdes.area_size;
       m_own_data = m_recdes.data = (char *) db_private_alloc (NULL, m_recdes.area_size);
@@ -72,6 +66,15 @@ record_descriptor::record_descriptor (const recdes &rec)
 
       m_status = status::COPIED;  // we assume this is a copied record
     }
+}
+
+record_descriptor::record_descriptor (const char *data, size_t size)
+  : record_descriptor ()
+{
+  // data is assigned and cannot be changed
+  m_status = status::IMMUTABLE;
+  m_recdes.data = const_cast<char *> (data);    // status will protect against changes
+  m_recdes.length = (int) size;
 }
 
 record_descriptor::~record_descriptor (void)

@@ -31,6 +31,9 @@
 #include <vector>
 #include <string>
 
+// forward definition
+struct or_buf;
+
 /*
  * the packer object packs or unpacks primitive objects from/into a buffer
  * the buffer is provided at initialization
@@ -61,9 +64,9 @@ namespace cubpacking
       int unpack_short (short *value);
 
       size_t get_packed_bigint_size (size_t curr_offset);
-      int pack_bigint (std::int64_t *value);
+      int pack_bigint (const std::int64_t *value);
       int unpack_bigint (std::int64_t *value);
-      int pack_bigint (std::uint64_t *value);
+      int pack_bigint (const std::uint64_t *value);
       int unpack_bigint (std::uint64_t *value);
 
       int pack_int_array (const int *array, const int count);
@@ -93,10 +96,20 @@ namespace cubpacking
       int pack_c_string (const char *str, const size_t str_size);
       int unpack_c_string (char *str, const size_t max_str_size);
 
+      // packer should gradually replace OR_BUF, but they will coexist for a while. there will be functionality
+      // strictly dependent on or_buf, so packer will have to cede at least some of the packing to or_buf
+      //
+      void assign_or_buf (const size_t size, or_buf &buf);
+
       const char *get_curr_ptr (void)
       {
 	return m_type == type::PACK ? m_write_ptr : m_read_ptr;
       };
+
+      size_t get_current_size (void)
+      {
+	return get_curr_ptr () - get_packer_buffer ();
+      }
 
       void align (const size_t req_alignment)
       {

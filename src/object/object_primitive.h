@@ -359,7 +359,7 @@ extern int pr_midxkey_get_element_nocopy (const DB_MIDXKEY * midxkey, int index,
 extern int pr_midxkey_add_elements (DB_VALUE * keyval, DB_VALUE * dbvals, int num_dbvals,
 				    TP_DOMAIN * dbvals_domain_list);
 extern int pr_midxkey_init_boundbits (char *bufptr, int n_atts);
-extern int pr_index_writeval_disk_size (DB_VALUE * value);
+extern int pr_index_writeval_disk_size (const DB_VALUE * value);
 extern int pr_data_writeval_disk_size (DB_VALUE * value);
 extern void pr_data_writeval (OR_BUF * buf, DB_VALUE * value);
 extern int pr_midxkey_unique_prefix (const DB_VALUE * db_midxkey1, const DB_VALUE * db_midxkey2, DB_VALUE * db_result);
