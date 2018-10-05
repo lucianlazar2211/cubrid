@@ -1318,11 +1318,13 @@ private:
   int load_overflow_context (PGBUF_LATCH_MODE page_latch);
   static int find_object_in_record (const btree_node_context &ovf_context, const record_descriptor & record,
                                     bool & stop, btree_object_search & searcher);
+  int append_object (const btree_key_record & key_record, btree_object_info & object);
 
   btree_node_context m_node_context;
   record_descriptor m_record;
   VPID m_first_overflow_vpid;
   VPID m_next_vpid;
+  btree_logger m_logger;
 };
 
 class btree_key_record
@@ -1361,6 +1363,8 @@ static void btree_record_modify_data (record_descriptor & record, UINT16 offset,
 static void btree_record_delete_data (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger);
 static void btree_record_insert_data (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
                                       btree_logger & logger);
+static bool btree_record_can_append_object (const btree_node_context & node_context, const record_descriptor & record,
+                                            size_t offset_after_key = 0);
 
 // *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////
@@ -35925,6 +35929,7 @@ btree_overflow_oids_record::btree_overflow_oids_record (const btree_node_context
   , m_record ()
   , m_first_overflow_vpid VPID_INITIALIZER
   , m_next_vpid VPID_INITIALIZER
+  , m_logger (m_node_context, RECORD_SLOTID)
 {
   //
 }
@@ -36062,6 +36067,38 @@ btree_overflow_oids_record::find_object_in_record (const btree_node_context & ov
       stop = true;
     }
   return NO_ERROR;
+}
+
+int
+btree_overflow_oids_record::append_object (const btree_key_record & key_record, btree_object_info & object_info)
+{
+  int error_code = NO_ERROR;
+  bool found = false;
+
+  // find a page with free space
+  btree_record_mapper_function find_func =
+    [&] (const btree_node_context &node_context, const record_descriptor & record, bool & stop) -> int
+    {
+      // stop when object can be appended
+      found = stop = btree_record_can_append_object (node_context, record);
+      return NO_ERROR;
+    };
+  error_code = map_records (PGBUF_LATCH_WRITE, find_func);
+  if (error_code != NO_ERROR)
+    {
+      return error_code;
+    }
+
+  if (found)
+    {
+      // add to current node
+      // todo
+    }
+  else
+    {
+      // create new node
+      // todo
+    }
 }
 
 int
