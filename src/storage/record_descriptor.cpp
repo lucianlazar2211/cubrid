@@ -71,10 +71,7 @@ record_descriptor::record_descriptor (const recdes &rec)
 record_descriptor::record_descriptor (const char *data, size_t size)
   : record_descriptor ()
 {
-  // data is assigned and cannot be changed
-  m_status = status::IMMUTABLE;
-  m_recdes.data = const_cast<char *> (data);    // status will protect against changes
-  m_recdes.length = (int) size;
+  set_data (data, size);
 }
 
 record_descriptor::~record_descriptor (void)
@@ -210,6 +207,15 @@ record_descriptor::get_data_for_modify (void)
   check_changes_are_permitted ();
 
   return m_recdes.data;
+}
+
+void
+record_descriptor::set_data (const char *data, size_t size)
+{
+  // data is assigned and cannot be changed
+  m_status = status::IMMUTABLE;
+  m_recdes.data = const_cast<char *> (data);    // status will protect against changes
+  m_recdes.length = (int) size;
 }
 
 void

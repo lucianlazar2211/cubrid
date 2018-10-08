@@ -119,9 +119,11 @@ enum btree_key_value_fetch_mode
  * 2. object is non-first in leaf record.
  * 3. object is first in a leaf record that has overflow pages.
  */
+const size_t BTREE_OBJECT_NON_UNIQUE_FIXED_SIZE = OR_OID_SIZE + 2 * OR_MVCCID_SIZE;
+const size_t BTREE_OBJECT_UNIQUE_FIXED_SIZE = BTREE_OBJECT_NON_UNIQUE_FIXED_SIZE + OR_OID_SIZE;
 #define BTREE_OBJECT_FIXED_SIZE(btree_info) \
   (BTREE_IS_UNIQUE ((btree_info)->unique_pk) ? \
-   2 * OR_OID_SIZE + 2 * OR_MVCCID_SIZE : OR_OID_SIZE + 2 * OR_MVCCID_SIZE)
+   BTREE_OBJECT_UNIQUE_FIXED_SIZE : BTREE_OBJECT_NON_UNIQUE_FIXED_SIZE)
 /* Maximum possible size for one b-tree object including all its information.
  */
 #define BTREE_OBJECT_MAX_SIZE (2 * OR_OID_SIZE + 2 * OR_MVCCID_SIZE)

@@ -37,6 +37,7 @@
 #define OID_INITIALIZER \
   {NULL_PAGEID, NULL_SLOTID, NULL_VOLID}
 
+#define OID_ER_MSG "%d|%d|%d"
 #define OID_AS_ARGS(oidp) (oidp)->volid, (oidp)->pageid, (oidp)->slotid
 
 #if !defined(SERVER_MODE)

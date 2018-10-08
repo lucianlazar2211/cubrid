@@ -813,7 +813,12 @@ struct rvfun RV_fun[] = {
    btree_rv_redo_record_modify,
    btree_rv_keyval_dump,
    log_rv_dump_hexa},
-
+  {RVBT_OVFOID_NEW_PAGE,
+   "RVBT_OVFOID_NEW_PAGE",
+   NULL,
+   btree_rv_redo_init_overflow_page,
+   NULL,
+   btree_rv_dump_redo_init_overflow_page},
 };
 
 /*

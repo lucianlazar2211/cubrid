@@ -47,8 +47,6 @@ namespace cubpacking
   class packer
   {
     public:
-
-
       packer ();
 
       void init_for_packing (char *storage, const size_t amount);
@@ -132,6 +130,11 @@ namespace cubpacking
       {
 	return m_end_ptr;
       };
+
+      bool is_ended (void)
+      {
+	return get_curr_ptr () == get_packer_end ();
+      }
 
     private:
       enum class type

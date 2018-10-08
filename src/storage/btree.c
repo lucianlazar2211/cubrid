@@ -1124,6 +1124,9 @@ struct btree_helper
 //////////////////////////////////////////////////////////////////////////
 // *INDENT-OFF*
 
+using btree_object_packing_buffer = aligned_stack_memory_buffer<BTREE_OBJECT_MAX_SIZE>;
+
+// forward definition
 class btree_key_record;
 
 // page context - can be leaf or overflow
@@ -1317,6 +1320,10 @@ public:
   const btree_node_context& get_node_context () const;
 
   int search_object (PGBUF_LATCH_MODE page_latch, btree_object_search & searcher);
+  int append_object_to_new_page (btree_object_info & object, VPID & vpid);
+
+  static void init_new_page (cubthread::entry * thread_p, PAGE_PTR page, const VPID & next_vpid,
+                             const char *record_data, size_t record_size);
 
   void set_overflow_vpid (const VPID & first_vpid);
 
@@ -35338,9 +35345,9 @@ btree_leaf_insert_new_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_V
     case BTREE_OP_INSERT_NEW_OBJECT:
       btree_rv_write_logical_undo (*btid_int, *key, helper->obj_info, logical_undo_buffer, logical_undo);
       key_context.get_leaf_logger ().
-        set_active_undoredo (logical_undo,
-                             btree_mvcc_info_is_insid_not_all_visible (&helper->obj_info.mvcc_info) ?
-                             RVBT_MVCC_INSERT_OBJECT : RVBT_NON_MVCC_INSERT_OBJECT);
+	set_active_undoredo (logical_undo,
+			     btree_mvcc_info_is_insid_not_all_visible (&helper->obj_info.mvcc_info) ?
+			     RVBT_MVCC_INSERT_OBJECT : RVBT_NON_MVCC_INSERT_OBJECT);
       break;
 
     case BTREE_OP_INSERT_UNDO_PHYSICAL_DELETE:
@@ -35365,6 +35372,60 @@ btree_leaf_insert_new_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_V
 
 
   // todo
+}
+
+int
+btree_rv_redo_init_overflow_page (THREAD_ENTRY * thread_p, LOG_RCV * recv)
+{
+  VPID next_vpid;
+
+  next_vpid = *(VPID *) recv->data;
+  size_t off = sizeof (VPID);
+
+  const char *rec_data = recv->data + off;
+  size_t rec_size = (size_t) recv->length - off;
+
+  assert (rec_size == BTREE_OBJECT_NON_UNIQUE_FIXED_SIZE || rec_size == BTREE_OBJECT_UNIQUE_FIXED_SIZE);
+
+  btree_overflow_oids_record::init_new_page (thread_p, recv->pgptr, next_vpid, rec_data, rec_size);
+  pgbuf_set_dirty (thread_p, recv->pgptr, DONT_FREE);
+
+  return NO_ERROR;
+}
+
+void
+btree_rv_dump_redo_init_overflow_page (FILE * fp, int length, void *data)
+{
+  VPID next_vpid;
+  next_vpid = *(VPID *) data;
+  size_t off = sizeof (VPID);
+
+  const char *rec_data = (char *) data + off;
+  size_t rec_size = (size_t) length - off;
+
+  packing_packer packer;
+  packer.init_for_unpacking (rec_data, rec_size);
+
+  BTREE_OBJECT_INFO object;
+
+  btree_packer_unpack_oid (packer, object.oid);
+  btree_oid_clear_mvcc_flags (&object.oid);
+
+  if (rec_size == BTREE_OBJECT_UNIQUE_FIXED_SIZE)
+    {
+      btree_packer_unpack_oid (packer, object.class_oid);
+    }
+  else
+    {
+      OID_SET_NULL (&object.class_oid);
+    }
+
+  btree_packer_unpack_mvccid (packer, object.mvcc_info.insert_mvccid);
+  btree_packer_unpack_mvccid (packer, object.mvcc_info.delete_mvccid);
+
+  fprintf (fp, BTREE_OBJECT_INFO_LOG_MSG ("object") "\n", BTREE_OBJECT_INFO_AS_ARGS (&object));
+
+  assert (packer.is_ended ());
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -35760,7 +35821,7 @@ static void
 btree_record_replace_object (record_descriptor & record, const btree_object_location & location,
                              btree_object_info object, btree_logger & logger)
 {
-  aligned_stack_memory_buffer<BTREE_OBJECT_MAX_SIZE> membuf;
+  btree_object_packing_buffer membuf;
   packing_packer packer;
 
   btree_object_adjust_flags_for_location (location, object);
@@ -36234,15 +36295,67 @@ btree_overflow_oids_record::search_object (PGBUF_LATCH_MODE page_latch, btree_ob
   return map_records (page_latch, map_func);
 }
 
+int
+btree_overflow_oids_record::append_object_to_new_page (btree_object_info & object, VPID & vpid)
+{
+  // clear current context
+  clear_overflow_context ();
+
+  int error_code = NO_ERROR;
+
+  PAGE_PTR new_page = btree_get_new_page (m_node_context.m_thread, m_node_context.m_btinfo, &vpid, NULL);
+  if (new_page == NULL)
+    {
+      ASSERT_ERROR_AND_SET (error_code);
+      return error_code;
+    }
+
+  // pack object to a buffer
+  cubpacking::packer packer;
+  btree_object_packing_buffer buffer;
+  packer.init_for_packing (buffer.get_ptr (), buffer.SIZE);
+  //btree_object_location location (m_node_context);   // init
+  //btree_packer_pack_object (packer, location, object);
+
+  assert (packer.is_ended ());
+
+  init_new_page (m_node_context.m_thread, new_page, m_first_overflow_vpid, buffer.get_ptr (), buffer.SIZE);
+  return NO_ERROR;
+}
+
 void
 btree_overflow_oids_record::set_overflow_vpid (const VPID & first_vpid)
 {
   m_first_overflow_vpid = first_vpid;
 }
 
+void
+btree_overflow_oids_record::init_new_page (cubthread::entry * thread_p, PAGE_PTR page, const VPID & next_vpid,
+                                           const char *record_data, size_t record_size)
+{
+  BTREE_OVERFLOW_HEADER ovf_header;
+
+  ovf_header.next_vpid = next_vpid;
+
+  record_descriptor record;
+
+  record.set_data_to_object (ovf_header);
+  if (spage_insert_at (thread_p, page, HEADER_SLOTID, &record.get_recdes ()) != SP_SUCCESS)
+    {
+      assert (false);
+    }
+
+  record.set_data (record_data, record_size);
+  if (spage_insert_at (thread_p, page, RECORD_SLOTID, &record.get_recdes ()) != SP_SUCCESS)
+    {
+      assert (false);
+    }
+}
+
 //
 //  btree_key_record
 //
+
 btree_key_record::btree_key_record (const btree_node_context & leaf_context, const db_value & key,
                                     const btree_search_key_helper & search_key, bool log_ops)
   : m_key (key)

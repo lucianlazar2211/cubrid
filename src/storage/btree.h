@@ -527,6 +527,13 @@ struct btree_object_info
 };
 #define BTREE_OBJECT_INFO_INITIALIZER \
   { OID_INITIALIZER, OID_INITIALIZER, BTREE_MVCC_INFO_INITIALIZER }
+#define BTREE_OBJECT_INFO_LOG_MSG(obj_name) \
+  obj_name ": oid=" OID_ER_MSG " class=" OID_ER_MSG " insert_mvccid=%llu delete_mvccid=%llu"
+#define BTREE_OBJECT_INFO_AS_ARGS(obj) \
+  OID_AS_ARGS(&(obj)->oid), \
+  OID_AS_ARGS(&(obj)->class_oid), \
+  (obj)->mvcc_info.insert_mvccid, \
+  (obj)->mvcc_info.delete_mvccid
 
 /* BTREE_RANGE_SCAN_PROCESS_KEY_FUNC -
  * btree_range_scan internal function that is called for each key that passes
@@ -629,6 +636,9 @@ extern int btree_rv_nop (THREAD_ENTRY * thread_p, LOG_RCV * recv);
 
 extern int btree_rv_redo_global_unique_stats_commit (THREAD_ENTRY * thread_p, LOG_RCV * recv);
 extern int btree_rv_undo_global_unique_stats_commit (THREAD_ENTRY * thread_p, LOG_RCV * recv);
+
+extern int btree_rv_redo_init_overflow_page (THREAD_ENTRY * thread_p, LOG_RCV * recv);
+extern void btree_rv_dump_redo_init_overflow_page (FILE * fp, int length, void *data);
 
 #include "scan_manager.h"
 

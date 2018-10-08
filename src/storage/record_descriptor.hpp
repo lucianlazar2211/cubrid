@@ -78,6 +78,10 @@ class record_descriptor
     std::size_t get_size (void) const;
     char *get_data_for_modify (void);   // try to avoid
 
+    void set_data (const char *data, size_t size);
+    template <typename T>
+    void set_data_to_object (const T &t);
+
     void modify_data (std::size_t offset, std::size_t old_size, std::size_t new_size, const char *new_data);
     void delete_data (std::size_t offset, std::size_t data_size);
     void insert_data (std::size_t offset, std::size_t new_size, const char *new_data);
@@ -116,4 +120,11 @@ record_descriptor::record_descriptor (aligned_stack_memory_buffer<S> &membuf)
   m_recdes.data = membuf.get_ptr ();
   m_own_data = NULL;
   m_status = status::NEW;
+}
+
+template <typename T>
+void
+record_descriptor::set_data_to_object (const T &t)
+{
+  set_data (reinterpret_cast<const char *> (&t), sizeof (t));
 }
