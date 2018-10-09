@@ -1156,31 +1156,11 @@ using btree_record_mapper_function = std::function<int (const btree_node_context
 using btree_object_mapper_function = std::function<int (const btree_object_info& obj, int offset_in_record,
   bool & stop)>;
 
-class btree_sysop_tracker
+// forward definition
+class btree_page_logger;
+class btree_logging_context
 {
 public:
-  btree_sysop_tracker ();
-  ~btree_sysop_tracker ();
-
-  void start ();
-  bool end ();
-  bool is_sysop ();
-
-private:
-  unsigned int m_level;
-};
-
-class btree_logger
-{
-public:
-
-  static const std::size_t KEY_DEFAULT_SIZE = 256;
-  static const std::size_t LOGICAL_UNDO_DEFAULT_SIZE =
-    (std::size_t) (OR_BTID_ALIGNED_SIZE + BTREE_OBJECT_MAX_SIZE + KEY_DEFAULT_SIZE + 2 * MAX_ALIGNMENT);
-  static const std::size_t INCREMENTAL_CHANGES_DEFAULT_SIZE = (std::size_t) BTREE_RV_BUFFER_SIZE;
-
-  using logical_undo_type = cubpacking::packer;
-  using incremental_buffer_type = append_buffer<INCREMENTAL_CHANGES_DEFAULT_SIZE>;
 
   enum class type
   {
@@ -1191,23 +1171,50 @@ public:
     RUN_POSTPONE
   };
 
-  btree_logger (void) = delete;
-  btree_logger (btree_sysop_tracker & sysop_tracker, const btree_node_context & node_context, PGSLOTID slotid);
-  btree_logger (const btree_logger& other, const btree_node_context & node_context, PGSLOTID slotid);
-  ~btree_logger (void);
+  static const std::size_t KEY_DEFAULT_SIZE = 256;
+  static const std::size_t LOGICAL_UNDO_DEFAULT_SIZE =
+    (std::size_t) (OR_BTID_ALIGNED_SIZE + BTREE_OBJECT_MAX_SIZE + KEY_DEFAULT_SIZE + 2 * MAX_ALIGNMENT);
+  using logical_undo_type = cubpacking::packer;
+
+  btree_logging_context ();
+  ~btree_logging_context ();
 
   void set_active_undoredo (logical_undo_type& logical_undo, LOG_RCVINDEX rcvindex);
   void set_active_redo (void);
   void set_compensate (const LOG_LSA & compensate_lsa);
   void set_run_postpone (const LOG_LSA & postpone_lsa);
+
+  void start_sysop ();
+  void end_sysop ();
+  bool is_sysop_started ();
+
+private:
+  unsigned int m_sysop_level;
+
+  friend btree_page_logger;
+
+  type m_type;
+  log_lsa m_reference_lsa;            // used for compensate and run postpone
+  LOG_RCVINDEX m_rcv_index;           // used for active logging
+  logical_undo_type* m_logical_undo_data;
+};
+
+class btree_page_logger
+{
+public:
+  static const std::size_t INCREMENTAL_CHANGES_DEFAULT_SIZE = (std::size_t) BTREE_RV_BUFFER_SIZE;
+  using incremental_buffer_type = append_buffer<INCREMENTAL_CHANGES_DEFAULT_SIZE>;
+
+  btree_page_logger (void) = delete;
+  btree_page_logger (btree_logging_context & logging_context, const btree_node_context & node_context, PGSLOTID slotid);
+  btree_page_logger (const btree_page_logger& other, const btree_node_context & node_context, PGSLOTID slotid);
+  ~btree_page_logger (void);
+  
   void set_rv_record_change (log_rv_record_change mode);
   void set_rv_btree_flag (btree_rv_flag flag);
 
   const log_lsa& get_prev_lsa (void);
 
-  void start_sysop (void);
-  void end_sysop (void);
-  void check_no_sysop (void);
   void log (void);
   void log (size_t redo_size, const char *redo_data);
 
@@ -1219,34 +1226,33 @@ public:
   void append_redo_data (size_t redo_size, const char *redo_data);
 
 private:
-  // todo: disable undo!
-
   const char * get_buffer_data (const incremental_buffer_type & buf) const;
 
   log_data_addr m_addr;
 
-  logical_undo_type* m_logical_undo_data;
   incremental_buffer_type m_undo_data;             // incremental physical undo logging
   incremental_buffer_type m_redo_data;             // incremental physical redo logging
-
-  type m_type;
-  log_lsa m_reference_lsa;            // used for compensate and run postpone
-  LOG_RCVINDEX m_rcv_index;           // used for active logging
-  btree_sysop_tracker& m_sysop_tracker;
+  
+  btree_logging_context& m_context;
   log_lsa m_prev_lsa;
 };
 
 struct btree_object_location
 {
-  const btree_key_record &m_key_context;
   const btree_node_context *m_node;
-  const record_descriptor *m_record;
   size_t m_offset_in_record;
 
-  btree_object_location (const btree_key_record & key_context)
-    : m_key_context (key_context)
-    {
-    }
+  btree_object_location () = default;
+  btree_object_location (const btree_node_context & context, size_t offset_in_record)
+  {
+    set_location (context, offset_in_record);
+  }
+
+  void set_location (const btree_node_context & context, size_t offset_in_record)
+  {
+    m_node = &context;
+    m_offset_in_record = offset_in_record;
+  }
 
   bool is_first_of_leaf () const;
   bool is_fixed_size () const;
@@ -1287,11 +1293,19 @@ public:
   int search_object (btree_object_search & searcher) const;
 
   bool try_append_object (const btree_key_record & key_record, btree_object_info & object);
+  void set_overflow_vpid (const VPID & vpid);
 
 private:
+  void get_first_object (btree_object_info & first_object);
+  void update_first_object (std::function<void (btree_object_info &)> & func_updater, record_descriptor & record);
+
+  void add_overflow_vpid (record_descriptor & record_copy, const VPID & vpid);
+  void delete_overflow_vpid (record_descriptor & record_copy);
+  void update_overflow_vpid (record_descriptor & record_copy, const VPID & vpid);
+
   // only constructible as part of btree_key_record
   friend btree_key_record;
-  btree_leaf_record (const btree_node_context& leaf_context, PGSLOTID slotid, btree_sysop_tracker & sysop_tracker);
+  btree_leaf_record (const btree_node_context& leaf_context, PGSLOTID slotid, btree_logging_context & sysop_tracker);
   btree_leaf_record () = delete;
 
   const btree_node_context& m_node_context;
@@ -1300,8 +1314,8 @@ private:
   // below data is filled by read_record function
   record_descriptor m_record;
   leaf_rec m_info;
-  int m_offset_after_key;
-  btree_logger m_logger;
+  std::size_t m_offset_after_key;
+  btree_page_logger m_logger;
 };
 
 class btree_overflow_oids_record
@@ -1320,7 +1334,9 @@ public:
   const btree_node_context& get_node_context () const;
 
   int search_object (PGBUF_LATCH_MODE page_latch, btree_object_search & searcher);
-  int append_object_to_new_page (btree_object_info & object, VPID & vpid);
+  int append_object_to_new_page (btree_object_info & object);
+  int append_object_to_existing_page (const btree_key_record & key_record, btree_object_info & object,
+                                      bool & was_appended);
 
   static void init_new_page (cubthread::entry * thread_p, PAGE_PTR page, const VPID & next_vpid,
                              const char *record_data, size_t record_size);
@@ -1331,7 +1347,7 @@ private:
   // only constructible as part of btree_key_record
   friend btree_key_record;
   btree_overflow_oids_record () = delete;
-  btree_overflow_oids_record (const btree_node_context & leaf_context, btree_sysop_tracker & sysop_tracker);
+  btree_overflow_oids_record (const btree_node_context & leaf_context, btree_logging_context & sysop_tracker);
 
   void iterate_start (void);
   void iterate_next (void);
@@ -1339,14 +1355,13 @@ private:
   int load_overflow_context (PGBUF_LATCH_MODE page_latch);
   static int find_object_in_record (const btree_node_context &ovf_context, const record_descriptor & record,
                                     bool & stop, btree_object_search & searcher);
-  int append_object (const btree_key_record & key_record, btree_object_info & object);
   void find_oid (const OID & oid, size_t & offset, bool & found);
 
   btree_node_context m_node_context;
   record_descriptor m_record;
   VPID m_first_overflow_vpid;
   VPID m_next_vpid;
-  btree_logger m_logger;
+  btree_page_logger m_logger;
 };
 
 class btree_key_record
@@ -1368,13 +1383,17 @@ public:
   PGSLOTID get_slotid () const;
   const btree_node_context& get_leaf_context () const;
   const db_value& get_key_value () const;
-  btree_logger& get_leaf_logger ();
+  btree_logging_context & get_logging_context ();
 
 private:
 
-  const db_value & m_key;
+  int create_key_record (btree_object_info & object);
+  int create_overflow_page_and_append_object (btree_object_info & object);
 
-  btree_sysop_tracker m_sysop_tracker;
+  const db_value & m_key;
+  bool has_record;
+
+  btree_logging_context m_logging_context;
 
   btree_leaf_record m_leaf_record;
 
@@ -1383,11 +1402,12 @@ private:
 
 static int btree_map_record_objects (const btree_node_context & node_context_arg, const record_descriptor & record_arg,
                                      size_t after_key_offset, const btree_object_mapper_function & map_func);
-static void btree_record_modify_data (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size,
-                                 const char *new_data, btree_logger & logger);
-static void btree_record_delete_data (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger);
-static void btree_record_insert_data (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
-                                      btree_logger & logger);
+static void btree_record_modify_data (record_descriptor & record, size_t offset, size_t old_size, size_t new_size,
+                                      const char *new_data, btree_page_logger & logger);
+static void btree_record_delete_data (record_descriptor & record, size_t offset, size_t old_size,
+                                      btree_page_logger & logger);
+static void btree_record_insert_data (record_descriptor & record, size_t offset, size_t new_size, const char *new_data,
+                                      btree_page_logger & logger);
 static bool btree_record_can_append_object (const btree_node_context & node_context, const record_descriptor & record,
                                             size_t offset_after_key = 0);
 
@@ -34885,7 +34905,7 @@ btree_oid_is_mvcc_flag_set (const OID * oid_ptr, btree_mvcc_flags_type mvcc_flag
 static bool
 btree_oid_is_record_flag_set (const OID * oid_ptr, btree_leafrec_flags_type rec_flag)
 {
-  return (oid_ptr->slotid & rec_flag) == (rec_flag);
+  return (oid_ptr->slotid & rec_flag) != 0;
 }
 
 /* Set b-tree flags into an OID. */
@@ -35085,23 +35105,23 @@ btree_object_info_no_class_get_disk_size (const BTREE_OBJECT_INFO & obj_info)
 }
 
 static void
-btree_record_modify_data (record_descriptor & record, UINT16 offset, UINT8 old_size, UINT8 new_size,
-			  const char *new_data, btree_logger & logger)
+btree_record_modify_data (record_descriptor & record, size_t offset, size_t old_size, size_t new_size,
+			  const char *new_data, btree_page_logger & logger)
 {
   logger.incremental_undoredo (offset, old_size, new_size, record.get_data () + offset, new_data);
   record.modify_data (offset, old_size, new_size, new_data);
 }
 
 static void
-btree_record_delete_data (record_descriptor & record, UINT16 offset, UINT8 old_size, btree_logger & logger)
+btree_record_delete_data (record_descriptor & record, size_t offset, size_t old_size, btree_page_logger & logger)
 {
   logger.incremental_undoredo (offset, old_size, 0, record.get_data () + offset, NULL);
   record.delete_data (offset, old_size);
 }
 
 static void
-btree_record_insert_data (record_descriptor & record, UINT16 offset, UINT8 new_size, const char *new_data,
-			  btree_logger & logger)
+btree_record_insert_data (record_descriptor & record, size_t offset, size_t new_size, const char *new_data,
+			  btree_page_logger & logger)
 {
   logger.incremental_undoredo (offset, 0, new_size, NULL, new_data);
   record.insert_data (offset, new_size, new_data);
@@ -35110,7 +35130,8 @@ btree_record_insert_data (record_descriptor & record, UINT16 offset, UINT8 new_s
 // new version for btree_rv_save_keyval_for_undo
 void
 btree_rv_write_logical_undo (btid_int & btree_info, const db_value & key, btree_object_info & object,
-			     pgbuf_resizable_buffer & data_buffer, btree_logger::logical_undo_type & logical_undo)
+			     pgbuf_resizable_buffer & data_buffer,
+			     btree_logging_context::logical_undo_type & logical_undo)
 {
   // what will be packed:
   //  1. btid_int
@@ -35187,133 +35208,6 @@ btree_packer_pack_key_value (packing_packer & packer, const db_value & key, cons
     }
 }
 
-// new version of btree_key_insert_new_key
-static int
-btree_leaf_insert_key (const btree_key_record & key_context, btree_object_info & object, btree_logger & logger)
-{
-  pgbuf_aligned_buffer data_buffer;
-  packing_packer data_packer;
-
-  btree_key_type key_type;
-  VPID overflow_first_vpid = VPID_INITIALIZER;
-
-  int error_code = NO_ERROR;
-
-  const btree_node_context & leaf_node_context = key_context.get_leaf_context ();
-
-  data_packer.init_for_packing (data_buffer.get_ptr (), data_buffer.SIZE);
-
-  // new key format is:
-  //
-  // [ OBJECT_INFO ] [ OVERFLOW KEY VPID or PACKED_KEY ]
-  //
-  // where:
-  // [ OBEJCT_INFO ] = [ OID.PAGEID ] [ OID.SLOTID + RECORD FLAGS ] [ OID.VOLID + MVCC FLAGS ] [ MVCC INFO ]
-  //
-  // we may set two record flags here: BTREE_LEAF_RECORD_CLASS_OID and BTREE_LEAF_RECORD_OVERFLOW_KEY
-  //
-
-  btree_object_info object_copy = object;
-  btree_object_location location (key_context);	// todo: init location
-  PR_TYPE *pr_type = leaf_node_context.m_btinfo->key_type->type;
-
-  size_t key_length = (size_t) btree_get_disk_size_of_key (&key_context.get_key_value ());
-  if (key_length >= (size_t) BTREE_MAX_KEYLEN_INPAGE)
-    {
-      // we'll have an overflow key
-      key_type = btree_key_type::BTREE_OVERFLOW_KEY;
-
-      logger.start_sysop ();
-
-      error_code = btree_store_overflow_key (leaf_node_context.m_thread, leaf_node_context.m_btinfo,
-					     &key_context.get_key_value (), (int) key_length,
-					     leaf_node_context.m_node_type, &overflow_first_vpid);
-      if (error_code != NO_ERROR)
-	{
-	  ASSERT_ERROR ();
-	  return error_code;
-	}
-      assert (!VPID_ISNULL (&overflow_first_vpid));
-
-      // set BTREE_LEAF_RECORD_OVERFLOW_KEY flag
-      btree_oid_set_record_flag (&object_copy.oid, BTREE_LEAF_RECORD_OVERFLOW_KEY);
-
-      key_length = DISK_VPID_SIZE;
-    }
-  else
-    {
-      key_type = BTREE_NORMAL_KEY;	// we'll just pack key
-    }
-
-  // BTREE_LEAF_RECORD_CLASS_OID is handled by btree_packer_pack_object
-  btree_packer_pack_object (data_packer, location, object_copy);
-
-  if (key_type == BTREE_OVERFLOW_KEY)
-    {
-      // pack overflow vpid
-      btree_packer_pack_vpid (data_packer, overflow_first_vpid);
-    }
-  else
-    {
-      btree_packer_pack_key_value (data_packer, key_context.get_key_value (), *pr_type, key_length);
-    }
-
-  // insert record
-  record_descriptor record (data_packer.get_packer_buffer (), data_packer.get_current_size ());
-  if (spage_insert_at (leaf_node_context.m_thread, leaf_node_context.m_page, key_context.get_slotid (),
-		       &record.get_recdes ()) != SP_SUCCESS)
-    {
-      // cannot fail!
-      assert (false);
-      return ER_FAILED;
-    }
-
-  // update node header
-  BTREE_NODE_HEADER *node_header = btree_get_node_header (leaf_node_context.m_thread, leaf_node_context.m_page);
-
-  // update max key length
-  if (node_header->max_key_len < key_length)
-    {
-      node_header->max_key_len = (short) key_length;
-
-      // logging - todo: find a better way
-      int packed_int;
-      char *packed_int_ptr = REINTERPRET_CAST (char *, &packed_int);
-      or_pack_int (packed_int_ptr, (int) key_length);
-      logger.set_rv_btree_flag (BTREE_RV_UPDATE_MAX_KEY_LEN);
-      logger.append_redo_data ((size_t) OR_INT_SIZE, packed_int_ptr);
-    }
-
-  // update split pivot
-  int key_count = btree_node_number_of_keys (leaf_node_context.m_thread, leaf_node_context.m_page);
-  btree_split_next_pivot (&node_header->split_info, (float) key_context.get_slotid () / key_count, key_count);
-
-  // put record data
-  logger.set_rv_record_change (LOG_RV_RECORD_INSERT);
-  logger.append_redo_data (data_packer.get_current_size (), data_packer.get_packer_buffer ());
-
-  // log changes
-  logger.log ();
-  if (key_type == btree_key_type::BTREE_OVERFLOW_KEY)
-    {
-      // also end sysop
-      logger.end_sysop ();
-    }
-  logger.check_no_sysop ();
-
-  // todo logging:
-  if (key_type == BTREE_OVERFLOW_KEY)
-    {
-      // btree_insert_log (&key_context, BTREE_INSERT_MODIFY_MSG);
-    }
-  else
-    {
-
-    }
-
-  return NO_ERROR;
-}
-
 // new version of btree_key_insert_new_object
 static int
 btree_leaf_insert_new_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_VALUE * key, PAGE_PTR * leaf_page,
@@ -35334,24 +35228,24 @@ btree_leaf_insert_new_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_V
   // init leaf context and logger
 
   btree_node_context leaf_context (*thread_p, *btid_int, *leaf_page, BTREE_LEAF_NODE);
-  pgbuf_resizable_buffer logical_undo_buffer;
-  btree_logger::logical_undo_type logical_undo;
+  pgbuf_resizable_buffer logical_undo_buffer;	// todo - move all logical undo to logging context
+  btree_logging_context::logical_undo_type logical_undo;
 
   btree_key_record key_context (leaf_context, *key, *search_key, helper->log_operations);
 
-  // init leaf logger
+  // set logging context
   switch (helper->purpose)
     {
     case BTREE_OP_INSERT_NEW_OBJECT:
       btree_rv_write_logical_undo (*btid_int, *key, helper->obj_info, logical_undo_buffer, logical_undo);
-      key_context.get_leaf_logger ().
+      key_context.get_logging_context ().
 	set_active_undoredo (logical_undo,
 			     btree_mvcc_info_is_insid_not_all_visible (&helper->obj_info.mvcc_info) ?
 			     RVBT_MVCC_INSERT_OBJECT : RVBT_NON_MVCC_INSERT_OBJECT);
       break;
 
     case BTREE_OP_INSERT_UNDO_PHYSICAL_DELETE:
-      key_context.get_leaf_logger ().set_compensate (helper->compensate_undo_nxlsa);
+      key_context.get_logging_context ().set_compensate (helper->compensate_undo_nxlsa);
       break;
 
     default:
@@ -35360,18 +35254,8 @@ btree_leaf_insert_new_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_V
       return ER_FAILED;
     }
 
-  // todo - handle uniques
-
-  // first things first... does key exist? because if it doesn't, just add it.
-  if (search_key->result != BTREE_SEARCH::BTREE_KEY_FOUND)
-    {
-      return btree_leaf_insert_key (key_context, helper->obj_info, key_context.get_leaf_logger ());
-    }
-
-  // key exists. we need to append new object
-
-
-  // todo
+  // append object to key. if key does not exist, it will be created.
+  return key_context.append_object (helper->obj_info);
 }
 
 int
@@ -35573,6 +35457,8 @@ btree_packed_object_size (const btree_object_location & location, const char *pa
 
   // mvcc info size
   packed_size += btree_get_mvcc_info_size_from_flags (btree_record_object_get_mvcc_flags (packed_ptr));
+
+  return packed_size;
 }
 
 static void
@@ -35778,7 +35664,7 @@ btree_record_get_write_packer (record_descriptor & record, packing_packer & writ
 
 static void
 btree_record_insert_object (record_descriptor & record, const btree_object_location & location,
-                            btree_object_info & object, btree_logger & logger)
+                            btree_object_info & object, btree_page_logger & logger)
 {
   packing_packer packer;
 
@@ -35798,7 +35684,7 @@ btree_record_insert_object (record_descriptor & record, const btree_object_locat
 }
 
 static void
-btree_record_delete_object (record_descriptor & record, const btree_object_location & location, btree_logger & logger)
+btree_record_delete_object (record_descriptor & record, const btree_object_location & location, btree_page_logger & logger)
 {
   // cannot delete first object in leaf record
   assert (!location.is_first_of_leaf ());
@@ -35819,7 +35705,7 @@ btree_record_delete_object (record_descriptor & record, const btree_object_locat
 
 static void
 btree_record_replace_object (record_descriptor & record, const btree_object_location & location,
-                             btree_object_info object, btree_logger & logger)
+                             btree_object_info object, btree_page_logger & logger)
 {
   btree_object_packing_buffer membuf;
   packing_packer packer;
@@ -35876,13 +35762,13 @@ btree_node_context::is_unique (void) const
 //
 
 btree_leaf_record::btree_leaf_record (const btree_node_context& leaf_context, PGSLOTID slotid,
-                                      btree_sysop_tracker & sysop_tracker)
+                                      btree_logging_context & logging_context)
   : m_node_context (leaf_context)
   , m_slotid (slotid)
   , m_record ()
   , m_info ()
   , m_offset_after_key (0)
-  , m_logger (sysop_tracker, leaf_context, slotid)
+  , m_logger (logging_context, leaf_context, slotid)
 {
   VPID_SET_NULL (&m_info.ovfl);
   m_info.key_len = 0;
@@ -35910,14 +35796,16 @@ btree_leaf_record::read_record (btree_key_value_fetch_mode keymode, db_value * d
       return error_code;
     }
 
+  int offset_after_key;
   error_code = btree_read_record (m_node_context.m_thread, m_node_context.m_btinfo, m_node_context.m_page,
                                   &m_record.get_recdes (), dbval, &m_info, BTREE_LEAF_NODE, clear_value,
-                                  &m_offset_after_key, keymode, NULL);
+                                  &offset_after_key, keymode, NULL);
   if (error_code != NO_ERROR)
     {
       ASSERT_ERROR ();
       return error_code;
     }
+  m_offset_after_key = (std::size_t) offset_after_key;
 
   return NO_ERROR;
 }
@@ -35960,7 +35848,7 @@ btree_leaf_record::try_append_object (const btree_key_record & key_record, btree
     }
 
   record_descriptor record_copy (m_record);
-  btree_object_location location (key_record); // todo: init
+  btree_object_location location (m_node_context, m_record.get_size ());    // end of leaf record
 
   btree_record_insert_object (record_copy, location, object, m_logger);
 
@@ -35974,6 +35862,147 @@ btree_leaf_record::try_append_object (const btree_key_record & key_record, btree
 
   // that's that
   return true;
+}
+
+void
+btree_leaf_record::get_first_object (btree_object_info & first_object)
+{
+  btree_object_location location (m_node_context, 0);
+  cubpacking::packer reader;
+  btree_record_get_read_packer (m_record, reader);
+  btree_packer_unpack_object (reader, location, first_object);
+}
+
+void
+btree_leaf_record::update_first_object (std::function<void (btree_object_info &)> & func_updater,
+                                        record_descriptor & record)
+{
+  btree_object_info first_object;
+  btree_object_location location (m_node_context, 0);
+
+  // read first object
+  cubpacking::packer reader;
+  btree_record_get_read_packer (record, reader);
+  btree_packer_unpack_object (reader, location, first_object);
+  size_t old_size = reader.get_current_size ();
+
+  // update it
+  func_updater (first_object);
+  size_t new_size = btree_object_info_get_disk_size (location, first_object);
+
+  // write it to record
+  btree_record_replace_object (record, location, first_object, m_logger);
+
+  assert (m_offset_after_key + new_size > old_size);
+  m_offset_after_key = m_offset_after_key + new_size - old_size;
+}
+
+void
+btree_leaf_record::set_overflow_vpid (const VPID & vpid)
+{
+  // make a copy
+  record_descriptor record_copy (m_record);
+
+  if (VPID_ISNULL (&vpid))
+    {
+      if (VPID_ISNULL (&m_info.ovfl))
+        {
+          // null to null? we have nothing to do and this request is invalid
+          assert (false);
+        }
+      else
+        {
+          // delete old vpid
+          delete_overflow_vpid (record_copy);
+        }
+    }
+  else
+    {
+      if (VPID_ISNULL (&m_info.ovfl))
+        {
+          // add overflow vpid
+          add_overflow_vpid (record_copy, vpid);
+        }
+      else
+        {
+          // update overflow vpid
+          update_overflow_vpid (record_copy, vpid);
+        }
+    }
+
+  // update
+  if (spage_update (m_node_context.m_thread, m_node_context.m_page, m_slotid, &record_copy.get_recdes ()) != SP_SUCCESS)
+    {
+      assert (false);
+    }
+  m_logger.log ();
+}
+
+void
+btree_leaf_record::add_overflow_vpid (record_descriptor & record_copy, const VPID & vpid)
+{
+  // we'll do two changes:
+  //
+  //  1. set BTREE_LEAF_RECORD_OVERFLOW_OIDS flag to first object
+  //  2. add VPID at the end of record
+  //
+
+  // step 1
+  // set flag to first object
+  std::function<void(btree_object_info&)> func_update =
+    [&] (btree_object_info & first_object) -> void
+    {
+      btree_oid_set_record_flag (&first_object.oid, BTREE_LEAF_RECORD_OVERFLOW_OIDS);
+    };
+  update_first_object (func_update, record_copy);
+
+  // step 2
+  // add vpid at the end of record
+  // make room
+  aligned_stack_memory_buffer<DISK_VPID_ALIGNED_SIZE> membuf;
+  cubpacking::packer writer;
+  writer.init_for_packing (membuf.get_ptr (), membuf.SIZE);
+  btree_packer_pack_vpid (writer, vpid);
+  assert (writer.is_ended ());
+  btree_record_insert_data (record_copy, record_copy.get_size (), membuf.SIZE, membuf.get_ptr (), m_logger);
+}
+
+void
+btree_leaf_record::delete_overflow_vpid (record_descriptor & record_copy)
+{
+  // we'll do two changes:
+  //
+  //  1. remove BTREE_LEAF_RECORD_OVERFLOW_OIDS from first object
+  //  2. remove VPID at end of record
+
+  // step 1
+  // remove flag from first object
+  std::function<void(btree_object_info&)> func_update =
+    [&] (btree_object_info & first_object) -> void
+    {
+      assert (btree_oid_is_record_flag_set (&first_object.oid, BTREE_LEAF_RECORD_OVERFLOW_OIDS));
+      first_object.oid.slotid &= ~BTREE_LEAF_RECORD_OVERFLOW_OIDS;
+    };
+  update_first_object (func_update, record_copy);
+
+  // step 2
+  // remove disk VPID at the end
+  btree_record_delete_data (record_copy, record_copy.get_size () - DISK_VPID_ALIGNED_SIZE,
+                            DISK_VPID_ALIGNED_SIZE, m_logger);
+}
+
+void
+btree_leaf_record::update_overflow_vpid (record_descriptor & record_copy, const VPID & vpid)
+{
+  // only change VPID at the end
+  aligned_stack_memory_buffer<DISK_VPID_ALIGNED_SIZE> membuf;
+  cubpacking::packer writer;
+  writer.init_for_packing (membuf.get_ptr (), membuf.SIZE);
+  btree_packer_pack_vpid (writer, vpid);
+  assert (writer.is_ended ());
+
+  btree_record_modify_data (record_copy, record_copy.get_size () - DISK_VPID_ALIGNED_SIZE, DISK_VPID_ALIGNED_SIZE,
+                            DISK_VPID_ALIGNED_SIZE, membuf.get_ptr (), m_logger);
 }
 
 const record_descriptor&
@@ -36005,7 +36034,7 @@ btree_leaf_record::get_offset_after_key () const
 //
 
 btree_overflow_oids_record::btree_overflow_oids_record (const btree_node_context & leaf_context,
-                                                        btree_sysop_tracker & sysop_tracker)
+                                                        btree_logging_context & sysop_tracker)
   : m_node_context (*leaf_context.m_thread, *leaf_context.m_btinfo, NULL, BTREE_OVERFLOW_NODE)
   , m_record ()
   , m_first_overflow_vpid VPID_INITIALIZER
@@ -36210,12 +36239,15 @@ btree_overflow_oids_record::find_object_in_record (const btree_node_context & ov
 }
 
 int
-btree_overflow_oids_record::append_object (const btree_key_record & key_record, btree_object_info & object_info)
+btree_overflow_oids_record::append_object_to_existing_page (const btree_key_record & key_record,
+                                                            btree_object_info & object_info, bool & was_appended)
 {
   int error_code = NO_ERROR;
   bool found = false;
   size_t offset;
   bool use_page;
+
+  was_appended = false;
 
   // find a page with free space
   //
@@ -36265,24 +36297,14 @@ btree_overflow_oids_record::append_object (const btree_key_record & key_record, 
   if (use_page)
     {
       // a good page was found; it is in current node context
-      btree_object_location location (key_record);   // todo: init
+      btree_object_location location (m_node_context, offset);
       record_descriptor record_copy (m_record);
       btree_record_insert_object (record_copy, location, object_info, m_logger);
       m_logger.log ();
+
+      was_appended = true;
     }
-  else
-    {
-      // create new node
-      // todo - btree key function:
-      //  open sysop
-      //  allocate new page
-      //  initialize new page and add new record
-      //  log new page
-      //  update overflow vpid in leaf record
-      //  log leaf changes
-      //  end sysop
-      //
-    }
+
   return NO_ERROR;
 }
 
@@ -36296,14 +36318,16 @@ btree_overflow_oids_record::search_object (PGBUF_LATCH_MODE page_latch, btree_ob
 }
 
 int
-btree_overflow_oids_record::append_object_to_new_page (btree_object_info & object, VPID & vpid)
+btree_overflow_oids_record::append_object_to_new_page (btree_object_info & object)
 {
+  VPID new_vpid;
+
   // clear current context
   clear_overflow_context ();
 
   int error_code = NO_ERROR;
 
-  PAGE_PTR new_page = btree_get_new_page (m_node_context.m_thread, m_node_context.m_btinfo, &vpid, NULL);
+  PAGE_PTR new_page = btree_get_new_page (m_node_context.m_thread, m_node_context.m_btinfo, &new_vpid, NULL);
   if (new_page == NULL)
     {
       ASSERT_ERROR_AND_SET (error_code);
@@ -36314,12 +36338,16 @@ btree_overflow_oids_record::append_object_to_new_page (btree_object_info & objec
   cubpacking::packer packer;
   btree_object_packing_buffer buffer;
   packer.init_for_packing (buffer.get_ptr (), buffer.SIZE);
-  //btree_object_location location (m_node_context);   // init
-  //btree_packer_pack_object (packer, location, object);
+  btree_object_location location (m_node_context, 0);
+  btree_packer_pack_object (packer, location, object);
 
   assert (packer.is_ended ());
 
   init_new_page (m_node_context.m_thread, new_page, m_first_overflow_vpid, buffer.get_ptr (), buffer.SIZE);
+
+  set_overflow_vpid (new_vpid);
+  m_node_context.m_page = new_page;
+
   return NO_ERROR;
 }
 
@@ -36359,13 +36387,15 @@ btree_overflow_oids_record::init_new_page (cubthread::entry * thread_p, PAGE_PTR
 btree_key_record::btree_key_record (const btree_node_context & leaf_context, const db_value & key,
                                     const btree_search_key_helper & search_key, bool log_ops)
   : m_key (key)
-  , m_sysop_tracker ()
-  , m_leaf_record (leaf_context, search_key.slotid, m_sysop_tracker)
-  , m_overflow_oids_record (leaf_context, m_sysop_tracker)
+  , has_record (false)
+  , m_logging_context ()
+  , m_leaf_record (leaf_context, search_key.slotid, m_logging_context)
+  , m_overflow_oids_record (leaf_context, m_logging_context)
 {
   if (search_key.result == BTREE_SEARCH::BTREE_KEY_FOUND)
     {
       // read leaf record
+      has_record = true;
       m_leaf_record.read_record ();
 
       m_overflow_oids_record.set_overflow_vpid (m_leaf_record.get_first_overflow_vpid ());
@@ -36423,13 +36453,36 @@ btree_key_record::search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_s
 int
 btree_key_record::append_object (btree_object_info & object)
 {
+  int error_code = NO_ERROR;
+
+  if (!has_record)
+    {
+      // insert new record
+      return create_key_record (object);
+    }
+
   // first try leaf
   if (m_leaf_record.try_append_object (*this, object))
     {
       return NO_ERROR;
     }
   // could not add to leaf
-  return m_overflow_oids_record.append_object (*this, object);
+
+  // let's try to add to an overflow page
+  bool was_appended = false;
+  error_code = m_overflow_oids_record.append_object_to_existing_page (*this, object, was_appended);
+  if (error_code != NO_ERROR)
+    {
+      return error_code;
+    }
+  if (was_appended)
+    {
+      // we are done
+      return NO_ERROR;
+    }
+
+  // could not append to any overflow page. create a new overflow OID's page and append there
+  return create_overflow_page_and_append_object (object);
 }
 
 bool
@@ -36456,24 +36509,169 @@ btree_key_record::get_key_value () const
   return m_key;
 }
 
-btree_logger&
-btree_key_record::get_leaf_logger ()
+btree_logging_context &
+btree_key_record::get_logging_context ()
 {
-  return m_leaf_record.m_logger;
+  return m_logging_context;
+}
+
+int
+btree_key_record::create_key_record (btree_object_info & object)
+{
+  // new key format is:
+  //
+  // [ OBJECT_INFO ] [ OVERFLOW KEY VPID or PACKED_KEY ]
+  //
+  // where:
+  // [ OBEJCT_INFO ] = [ OID.PAGEID ] [ OID.SLOTID + RECORD FLAGS ] [ OID.VOLID + MVCC FLAGS ] [ MVCC INFO ]
+  //
+  // we may set two record flags here: BTREE_LEAF_RECORD_CLASS_OID and BTREE_LEAF_RECORD_OVERFLOW_KEY
+  //
+
+  pgbuf_aligned_buffer data_buffer;
+  packing_packer data_packer;
+
+  btree_key_type key_type;
+  VPID overflow_first_vpid = VPID_INITIALIZER;
+
+  int error_code = NO_ERROR;
+
+  data_packer.init_for_packing (data_buffer.get_ptr (), data_buffer.SIZE);
+
+  btree_object_info object_copy = object;
+  btree_object_location location (m_leaf_record.m_node_context, 0);   // start of leaf record
+  PR_TYPE *pr_type = m_leaf_record.m_node_context.m_btinfo->key_type->type;
+
+  size_t key_length = (size_t) btree_get_disk_size_of_key (&m_key);
+  if (key_length >= (size_t) BTREE_MAX_KEYLEN_INPAGE)
+    {
+      // we'll have an overflow key
+      key_type = btree_key_type::BTREE_OVERFLOW_KEY;
+
+      m_logging_context.start_sysop ();
+
+      error_code = btree_store_overflow_key (m_leaf_record.m_node_context.m_thread,
+                                             m_leaf_record.m_node_context.m_btinfo, &m_key, (int) key_length,
+					     m_leaf_record.m_node_context.m_node_type, &overflow_first_vpid);
+      if (error_code != NO_ERROR)
+	{
+	  ASSERT_ERROR ();
+	  return error_code;
+	}
+      assert (!VPID_ISNULL (&overflow_first_vpid));
+
+      // set BTREE_LEAF_RECORD_OVERFLOW_KEY flag
+      btree_oid_set_record_flag (&object_copy.oid, BTREE_LEAF_RECORD_OVERFLOW_KEY);
+
+      key_length = DISK_VPID_SIZE;
+    }
+  else
+    {
+      key_type = BTREE_NORMAL_KEY;	// we'll just pack key
+    }
+
+  // BTREE_LEAF_RECORD_CLASS_OID is handled by btree_packer_pack_object
+  btree_packer_pack_object (data_packer, location, object_copy);
+
+  if (key_type == BTREE_OVERFLOW_KEY)
+    {
+      // pack overflow vpid
+      btree_packer_pack_vpid (data_packer, overflow_first_vpid);
+    }
+  else
+    {
+      btree_packer_pack_key_value (data_packer, m_key, *pr_type, key_length);
+    }
+
+  // insert record
+  record_descriptor record (data_packer.get_packer_buffer (), data_packer.get_current_size ());
+  if (spage_insert_at (m_leaf_record.m_node_context.m_thread, m_leaf_record.m_node_context.m_page,
+                       m_leaf_record.m_slotid, &record.get_recdes ()) != SP_SUCCESS)
+    {
+      // cannot fail!
+      assert (false);
+      return ER_FAILED;
+    }
+
+  // update node header
+  BTREE_NODE_HEADER *node_header = btree_get_node_header (m_leaf_record.m_node_context.m_thread,
+                                                          m_leaf_record.m_node_context.m_page);
+
+  // update max key length
+  if (node_header->max_key_len < key_length)
+    {
+      node_header->max_key_len = (short) key_length;
+
+      // logging - todo: find a better way
+      int packed_int;
+      char *packed_int_ptr = REINTERPRET_CAST (char *, &packed_int);
+      or_pack_int (packed_int_ptr, (int) key_length);
+      m_leaf_record.m_logger.set_rv_btree_flag (BTREE_RV_UPDATE_MAX_KEY_LEN);
+      m_leaf_record.m_logger.append_redo_data ((size_t) OR_INT_SIZE, packed_int_ptr);
+    }
+
+  // update split pivot
+  int key_count = btree_node_number_of_keys (m_leaf_record.m_node_context.m_thread,
+                                             m_leaf_record.m_node_context.m_page);
+  btree_split_next_pivot (&node_header->split_info, (float) m_leaf_record.m_slotid / key_count, key_count);
+
+  // put record data
+  m_leaf_record.m_logger.set_rv_record_change (LOG_RV_RECORD_INSERT);
+  m_leaf_record.m_logger.append_redo_data (data_packer.get_current_size (), data_packer.get_packer_buffer ());
+
+  // log changes
+  m_leaf_record.m_logger.log ();
+  if (key_type == btree_key_type::BTREE_OVERFLOW_KEY)
+    {
+      // also end sysop
+      m_logging_context.end_sysop ();
+    }
+  assert (!m_logging_context.is_sysop_started ());
+
+  return NO_ERROR;
+}
+
+int
+btree_key_record::create_overflow_page_and_append_object (btree_object_info & object)
+{
+  int error_code = NO_ERROR;
+
+  // two things we need to do:
+  //
+  //  1. create new overflow page to which object is appended
+  //  2. update or add first overflow VPID to leaf page
+  //
+
+  // since we'll be changing multiple pages, we need system operation
+  m_logging_context.start_sysop ();
+
+  // append new page to overflow OID's; new page is considered first
+  error_code = m_overflow_oids_record.append_object_to_new_page (object);
+  if (error_code != NO_ERROR)
+    {
+      return error_code;
+    }
+
+  // set first overflow OID's VPID to leaf record
+  m_leaf_record.set_overflow_vpid (m_overflow_oids_record.m_first_overflow_vpid);
+
+  m_logging_context.end_sysop ();
+
+  return NO_ERROR;
 }
 
 //
-// btree_sysop_tracker
+// btree_logging_context
 //
-btree_sysop_tracker::btree_sysop_tracker ()
-  : m_level (0)
+btree_logging_context::btree_logging_context ()
+  : m_sysop_level (0)
 {
   //
 }
 
-btree_sysop_tracker::~btree_sysop_tracker ()
+btree_logging_context::~btree_logging_context ()
 {
-  if (m_level > 0)
+  if (m_sysop_level > 0)
     {
       // sys op leaked
       log_sysop_abort (&cubthread::get_entry ());
@@ -36481,37 +36679,95 @@ btree_sysop_tracker::~btree_sysop_tracker ()
 }
 
 void
-btree_sysop_tracker::start ()
+btree_logging_context::start_sysop ()
 {
-  if (m_level++ == 0)
+  if (m_sysop_level++ == 0)
     {
       log_sysop_start (&cubthread::get_entry ());
     }
 }
 
-bool
-btree_sysop_tracker::end ()
+void
+btree_logging_context::end_sysop ()
 {
-  assert (is_sysop ());
-  if (m_level > 1)
+  assert (is_sysop_started ());
+  if (m_sysop_level > 1)
     {
-      --m_level;
+      --m_sysop_level;
     }
-  return m_level == 0;
+
+  if (m_sysop_level > 0)
+    {
+      // we only log when all system operation levels are ended
+    }
+
+  cubthread::entry *thread_p = &cubthread::get_entry ();
+
+  switch (m_type)
+    {
+    case btree_logging_context::type::INVALID:
+      assert (false);
+      break;
+    case btree_logging_context::type::ACTIVE_UNDOREDO:
+      log_sysop_end_logical_undo (thread_p, m_rcv_index, NULL, (int) m_logical_undo_data->get_current_size (),
+                                  m_logical_undo_data->get_packer_buffer ());
+      break;
+    case btree_logging_context::type::ACTIVE_REDO:
+      log_sysop_commit (thread_p);
+      break;
+    case btree_logging_context::type::COMPENSATE:
+      log_sysop_end_logical_compensate (thread_p, &m_reference_lsa);
+      break;
+    case btree_logging_context::type::RUN_POSTPONE:
+      log_sysop_end_logical_run_postpone (thread_p, &m_reference_lsa);
+      break;
+    default:
+      assert (false);
+      break;
+    }
 }
 
 bool
-btree_sysop_tracker::is_sysop ()
+btree_logging_context::is_sysop_started ()
 {
-  return m_level > 0;
+  return m_sysop_level > 0;
+}
+
+void
+btree_logging_context::set_active_undoredo (logical_undo_type& logical_undo, LOG_RCVINDEX rcvindex)
+{
+  m_type = type::ACTIVE_UNDOREDO;
+  m_logical_undo_data = &logical_undo;
+  m_rcv_index = rcvindex;
+}
+
+void
+btree_logging_context::set_active_redo (void)
+{
+  m_type = type::ACTIVE_REDO;
+}
+
+void
+btree_logging_context::set_compensate (const LOG_LSA & compensate_lsa)
+{
+  m_type = type::COMPENSATE;
+  m_reference_lsa = compensate_lsa;
+}
+
+void
+btree_logging_context::set_run_postpone (const LOG_LSA & postpone_lsa)
+{
+  m_type = type::RUN_POSTPONE;
+  m_reference_lsa = postpone_lsa;
 }
 
 //
-// btree_logger
+// btree_page_logger
 //
 
-btree_logger::btree_logger (btree_sysop_tracker & sysop_tracker, const btree_node_context & node_context, PGSLOTID slotid)
-  : m_sysop_tracker (sysop_tracker)
+btree_page_logger::btree_page_logger (btree_logging_context & logging_context, const btree_node_context & node_context,
+                                      PGSLOTID slotid)
+  : m_context (logging_context)
 {
   m_addr.vfid = NULL;   // does not matter
   m_addr.pgptr = node_context.m_page;
@@ -36529,125 +36785,50 @@ btree_logger::btree_logger (btree_sysop_tracker & sysop_tracker, const btree_nod
   LSA_SET_NULL (&m_prev_lsa);
 }
 
-btree_logger::btree_logger (const btree_logger& other, const btree_node_context & node_context, PGSLOTID slotid)
-  : btree_logger (other.m_sysop_tracker, node_context, slotid)
+btree_page_logger::btree_page_logger (const btree_page_logger& other, const btree_node_context & node_context,
+                                      PGSLOTID slotid)
+  : btree_page_logger (other.m_context, node_context, slotid)
 {
   //
 }
 
-btree_logger::~btree_logger (void)
+btree_page_logger::~btree_page_logger (void)
 {
   //
 }
 
 void
-btree_logger::set_active_undoredo (logical_undo_type& logical_undo, LOG_RCVINDEX rcvindex)
-{
-  m_type = type::ACTIVE_UNDOREDO;
-  m_logical_undo_data = &logical_undo;
-  m_rcv_index = rcvindex;
-}
-
-void
-btree_logger::set_active_redo (void)
-{
-  m_type = type::ACTIVE_REDO;
-}
-
-void
-btree_logger::set_compensate (const LOG_LSA & compensate_lsa)
-{
-  m_type = type::COMPENSATE;
-  m_reference_lsa = compensate_lsa;
-}
-
-void
-btree_logger::set_run_postpone (const LOG_LSA & postpone_lsa)
-{
-  m_type = type::RUN_POSTPONE;
-  m_reference_lsa = postpone_lsa;
-}
-
-void
-btree_logger::set_rv_record_change (log_rv_record_change mode)
+btree_page_logger::set_rv_record_change (log_rv_record_change mode)
 {
   LOG_RV_RECORD_SET_MODIFY_MODE (&m_addr, mode);
 }
 
 void
-btree_logger::set_rv_btree_flag (btree_rv_flag flag)
+btree_page_logger::set_rv_btree_flag (btree_rv_flag flag)
 {
   m_addr.offset |= flag;
 }
 
 const log_lsa &
-btree_logger::get_prev_lsa (void)
+btree_page_logger::get_prev_lsa (void)
 {
   return m_prev_lsa;
 }
 
 void
-btree_logger::start_sysop (void)
-{
-  m_sysop_tracker.start ();
-}
-
-void
-btree_logger::end_sysop (void)
-{
-  if (!m_sysop_tracker.end ())
-    {
-      // no logging necessary
-      return;
-    }
-
-  cubthread::entry *thread_p = &cubthread::get_entry ();
-
-  // log end sysop; the type of end is determined by type of logging
-  switch (m_type)
-    {
-    case btree_logger::type::INVALID:
-      assert (false);
-      break;
-    case btree_logger::type::ACTIVE_UNDOREDO:
-      log_sysop_end_logical_undo (thread_p, m_rcv_index, NULL, (int) m_logical_undo_data->get_current_size (),
-                                  m_logical_undo_data->get_packer_buffer ());
-      break;
-    case btree_logger::type::ACTIVE_REDO:
-      log_sysop_commit (thread_p);
-      break;
-    case btree_logger::type::COMPENSATE:
-      log_sysop_end_logical_compensate (thread_p, &m_reference_lsa);
-      break;
-    case btree_logger::type::RUN_POSTPONE:
-      log_sysop_end_logical_run_postpone (thread_p, &m_reference_lsa);
-      break;
-    default:
-      assert (false);
-      break;
-    }
-}
-
-void
-btree_logger::check_no_sysop (void)
-{
-  assert (!m_sysop_tracker.is_sysop ());
-}
-
-void
-btree_logger::log (void)
+btree_page_logger::log (void)
 {
   log (m_redo_data.get_size (), get_buffer_data (m_redo_data));
 }
 
 void
-btree_logger::log (size_t redo_size, const char *redo_data)
+btree_page_logger::log (size_t redo_size, const char *redo_data)
 {
   LSA_COPY (&m_prev_lsa, pgbuf_get_lsa (m_addr.pgptr));
 
   cubthread::entry *thread_p = &cubthread::get_entry ();
 
-  if (m_sysop_tracker.is_sysop ())
+  if (m_context.is_sysop_started ())
     {
       // physical undoredo
       log_append_undoredo_data (thread_p, RVBT_RECORD_MODIFY_UNDOREDO, &m_addr, (int) m_undo_data.get_size (),
@@ -36655,27 +36836,28 @@ btree_logger::log (size_t redo_size, const char *redo_data)
     }
   else
     {
-    switch (m_type)
+    switch (m_context.m_type)
       {
-      case btree_logger::type::INVALID:
+      case btree_logging_context::type::INVALID:
         assert (false);
         break;
-      case btree_logger::type::ACTIVE_UNDOREDO:
-        log_append_undoredo_data (thread_p, m_rcv_index, &m_addr, (int) m_logical_undo_data->get_current_size (),
-                                  (int) redo_size, m_logical_undo_data->get_packer_buffer (), redo_data);
+      case btree_logging_context::type::ACTIVE_UNDOREDO:
+        log_append_undoredo_data (thread_p, m_context.m_rcv_index, &m_addr,
+                                  (int) m_context.m_logical_undo_data->get_current_size (),
+                                  (int) redo_size, m_context.m_logical_undo_data->get_packer_buffer (), redo_data);
         break;
-      case btree_logger::type::ACTIVE_REDO:
+      case btree_logging_context::type::ACTIVE_REDO:
         log_append_redo_data (thread_p, RVBT_RECORD_MODIFY_NO_UNDO, &m_addr, (int) redo_size, redo_data);
         break;
-      case btree_logger::type::COMPENSATE:
+      case btree_logging_context::type::COMPENSATE:
         log_append_compensate_with_undo_nxlsa (thread_p, RVBT_RECORD_MODIFY_COMPENSATE,
                                                pgbuf_get_vpid_ptr (m_addr.pgptr), m_addr.offset, m_addr.pgptr,
                                                (int) redo_size, redo_data, LOG_FIND_CURRENT_TDES (thread_p),
-                                               &m_reference_lsa);
+                                               &m_context.m_reference_lsa);
         break;
-      case btree_logger::type::RUN_POSTPONE:
+      case btree_logging_context::type::RUN_POSTPONE:
         log_append_run_postpone (thread_p, RVBT_RECORD_MODIFY_NO_UNDO, &m_addr, pgbuf_get_vpid_ptr (m_addr.pgptr),
-                                 (int) redo_size, redo_data, &m_reference_lsa);
+                                 (int) redo_size, redo_data, &m_context.m_reference_lsa);
         break;
       default:
         assert (false);
@@ -36687,13 +36869,13 @@ btree_logger::log (size_t redo_size, const char *redo_data)
 }
 
 bool
-btree_logger::is_physical_undo_needed (void) const
+btree_page_logger::is_physical_undo_needed (void) const
 {
-  return m_sysop_tracker.is_sysop ();
+  return m_context.is_sysop_started ();
 }
 
 void
-btree_logger::incremental_undo (size_t offset, size_t undo_size, size_t redo_size, const char *undo_data)
+btree_page_logger::incremental_undo (size_t offset, size_t undo_size, size_t redo_size, const char *undo_data)
 {
   assert (offset <= std::numeric_limits<std::uint16_t>::max ());
   assert (undo_size <= std::numeric_limits<std::uint8_t>::max ());
@@ -36716,7 +36898,7 @@ btree_logger::incremental_undo (size_t offset, size_t undo_size, size_t redo_siz
 }
 
 void
-btree_logger::incremental_redo (size_t offset, size_t undo_size, size_t redo_size, const char *redo_data)
+btree_page_logger::incremental_redo (size_t offset, size_t undo_size, size_t redo_size, const char *redo_data)
 {
   assert (offset <= std::numeric_limits<std::uint16_t>::max ());
   assert (undo_size <= std::numeric_limits<std::uint8_t>::max ());
@@ -36733,7 +36915,7 @@ btree_logger::incremental_redo (size_t offset, size_t undo_size, size_t redo_siz
 }
 
 void
-btree_logger::incremental_undoredo (size_t offset, size_t undo_size, size_t redo_size, const char *undo_data,
+btree_page_logger::incremental_undoredo (size_t offset, size_t undo_size, size_t redo_size, const char *undo_data,
                                     const char *redo_data)
 {
   incremental_undo (offset, undo_size, redo_size, undo_data);
@@ -36741,13 +36923,13 @@ btree_logger::incremental_undoredo (size_t offset, size_t undo_size, size_t redo
 }
 
 void
-btree_logger::append_redo_data (size_t redo_size, const char *redo_data)
+btree_page_logger::append_redo_data (size_t redo_size, const char *redo_data)
 {
   m_redo_data.append (redo_data, redo_size);
 }
 
 const char *
-btree_logger::get_buffer_data (const incremental_buffer_type & buf) const
+btree_page_logger::get_buffer_data (const incremental_buffer_type & buf) const
 {
   return buf.get_size () == 0 ? NULL : buf.get_data ();
 }
@@ -36779,11 +36961,21 @@ btree_object_location::is_fixed_size () const
       return true;
     }
 
+  //
   // if key has overflow oids, first object in leaf is fixed size
-  if (m_key_context.has_overflow_oids () && m_offset_in_record == 0)
-    {
-      return true;
-    }
+  // if (m_key_record.has_overflow_oids () && m_offset_in_record == 0)
+  //  {
+  //    return true;
+  //  }
+  //
+  //  This used to be one of the condition for fixed size. The purpose is to make sure there will be enough space if
+  //  first and only object is replaced with an object from overflow pages. If packed object info is larger, there may
+  //  be not enough space to do the record update.
+  //
+  //  However, there's an alternative to this approach. If we'd have to increase the record size and there's not enough
+  //  space, just restart the operation from the top and split the node. The occurrence of this case should be too rare
+  //  to impact performance in any way. It is better to simplify things.
+  //
 
   // if none of the above, object does not have fixed size
   return false;
