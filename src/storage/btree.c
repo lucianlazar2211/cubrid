@@ -1128,6 +1128,7 @@ using btree_object_packing_buffer = aligned_stack_memory_buffer<BTREE_OBJECT_MAX
 
 // forward definition
 class btree_key_record;
+class btree_page_logger;
 
 // page context - can be leaf or overflow
 struct btree_node_context
@@ -1153,11 +1154,11 @@ struct btree_node_context
 //
 using btree_record_mapper_function = std::function<int (const btree_node_context &node_context,
   const record_descriptor & record, bool & stop)>;
+using btree_record_modify_function = std::function<void (record_descriptor & record, btree_page_logger & page_logger)>;
+
 using btree_object_mapper_function = std::function<int (const btree_object_info& obj, int offset_in_record,
   bool & stop)>;
 
-// forward definition
-class btree_page_logger;
 class btree_logging_context
 {
 public:
@@ -1166,6 +1167,7 @@ public:
   {
     INVALID,
     ACTIVE_UNDOREDO,
+    ACTIVE_UNDOREDO_AND_POSTPONE,
     ACTIVE_REDO,
     COMPENSATE,
     RUN_POSTPONE
@@ -1180,6 +1182,8 @@ public:
   ~btree_logging_context ();
 
   void set_active_undoredo (logical_undo_type& logical_undo, LOG_RCVINDEX rcvindex);
+  void set_active_undoredo_and_postpone (logical_undo_type& logical_undo, LOG_RCVINDEX rcvindex,
+                                         LOG_RCVINDEX postpone_rcvindex);
   void set_active_redo (void);
   void set_compensate (const LOG_LSA & compensate_lsa);
   void set_run_postpone (const LOG_LSA & postpone_lsa);
@@ -1196,6 +1200,7 @@ private:
   type m_type;
   log_lsa m_reference_lsa;            // used for compensate and run postpone
   LOG_RCVINDEX m_rcv_index;           // used for active logging
+  LOG_RCVINDEX m_postpone_rcv_index;  // used by ACTIVE_UNDOREDO_AND_POSTPONE
   logical_undo_type* m_logical_undo_data;
 };
 
@@ -1295,6 +1300,8 @@ public:
   bool try_append_object (const btree_key_record & key_record, btree_object_info & object);
   void set_overflow_vpid (const VPID & vpid);
 
+  void update_record (const btree_record_modify_function & mod_func);
+
 private:
   void get_first_object (btree_object_info & first_object);
   void update_first_object (std::function<void (btree_object_info &)> & func_updater, record_descriptor & record);
@@ -1343,6 +1350,8 @@ public:
 
   void set_overflow_vpid (const VPID & first_vpid);
 
+  void update_record (const btree_record_modify_function & mod_func);
+
 private:
   // only constructible as part of btree_key_record
   friend btree_key_record;
@@ -1378,6 +1387,7 @@ public:
   int search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_search & searcher);    // search object
 
   int append_object (btree_object_info & object);
+  int mark_deleted_object (btree_object_info & object);
 
   bool has_overflow_oids () const;
   PGSLOTID get_slotid () const;
@@ -1386,9 +1396,15 @@ public:
   btree_logging_context & get_logging_context ();
 
 private:
+  using match_object_function = std::function<bool (const btree_mvcc_info &)>;
 
   int create_key_record (btree_object_info & object);
   int create_overflow_page_and_append_object (btree_object_info & object);
+
+  int find_object (PGBUF_LATCH_MODE latch_mode, const OID & oid, const match_object_function & match_func,
+                   btree_object_location & location, bool & found);
+
+  void update_node_record (const btree_node_context * m_node_p, const btree_record_modify_function & update_func);
 
   const db_value & m_key;
   bool has_record;
@@ -35226,26 +35242,25 @@ btree_leaf_insert_new_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_V
   btree_insert_helper *helper = REINTERPRET_CAST (btree_insert_helper *, other_args);
 
   // init leaf context and logger
-
   btree_node_context leaf_context (*thread_p, *btid_int, *leaf_page, BTREE_LEAF_NODE);
   pgbuf_resizable_buffer logical_undo_buffer;	// todo - move all logical undo to logging context
   btree_logging_context::logical_undo_type logical_undo;
 
-  btree_key_record key_context (leaf_context, *key, *search_key, helper->log_operations);
+  btree_key_record key_record (leaf_context, *key, *search_key, helper->log_operations);
 
   // set logging context
   switch (helper->purpose)
     {
     case BTREE_OP_INSERT_NEW_OBJECT:
       btree_rv_write_logical_undo (*btid_int, *key, helper->obj_info, logical_undo_buffer, logical_undo);
-      key_context.get_logging_context ().
+      key_record.get_logging_context ().
 	set_active_undoredo (logical_undo,
 			     btree_mvcc_info_is_insid_not_all_visible (&helper->obj_info.mvcc_info) ?
 			     RVBT_MVCC_INSERT_OBJECT : RVBT_NON_MVCC_INSERT_OBJECT);
       break;
 
     case BTREE_OP_INSERT_UNDO_PHYSICAL_DELETE:
-      key_context.get_logging_context ().set_compensate (helper->compensate_undo_nxlsa);
+      key_record.get_logging_context ().set_compensate (helper->compensate_undo_nxlsa);
       break;
 
     default:
@@ -35254,8 +35269,65 @@ btree_leaf_insert_new_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_V
       return ER_FAILED;
     }
 
+  // todo - take necessary locks and check unique constraint
+
   // append object to key. if key does not exist, it will be created.
-  return key_context.append_object (helper->obj_info);
+  return key_record.append_object (helper->obj_info);
+}
+
+// new btree_key_find_and_insert_delete_mvccid
+static int
+btree_leaf_insert_delete_mvccid (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_VALUE * key,
+				 PAGE_PTR * leaf_page, BTREE_SEARCH_KEY_HELPER * search_key, bool * restart,
+				 void *other_args)
+{
+  assert (thread_p != NULL);
+  assert (btid_int != NULL);
+  assert (key != NULL);
+  assert (leaf_page != NULL);
+  assert (search_key != NULL);
+  assert (restart != NULL);
+  assert (other_args != NULL);
+
+  int error_code = NO_ERROR;
+
+  btree_insert_helper *helper = REINTERPRET_CAST (btree_insert_helper *, other_args);
+
+  btree_perf_track_traverse_time (thread_p, helper);
+
+  if (search_key->result != BTREE_KEY_FOUND)
+    {
+      /* Impossible. Object and key should exist in b-tree. */
+      assert (false);
+      btree_set_unknown_key_error (thread_p, btid_int->sys_btid, key, "btree_key_find_and_insert_delete_mvccid");
+      return ER_BTREE_UNKNOWN_KEY;
+    }
+
+  // init leaf context and logger
+  btree_node_context leaf_context (*thread_p, *btid_int, *leaf_page, BTREE_LEAF_NODE);
+  pgbuf_resizable_buffer logical_undo_buffer;	// todo - move all logical undo to logging context
+  btree_logging_context::logical_undo_type logical_undo;
+
+  btree_key_record key_record (leaf_context, *key, *search_key, helper->log_operations);
+
+  // set logging context
+  switch (helper->purpose)
+    {
+    case BTREE_OP_INSERT_MVCC_DELID:
+      btree_rv_write_logical_undo (*btid_int, *key, helper->obj_info, logical_undo_buffer, logical_undo);
+      key_record.get_logging_context ().set_active_undoredo (logical_undo, RVBT_MVCC_DELETE_OBJECT);
+      break;
+    case RVBT_MVCC_DELETE_OBJECT:
+      btree_rv_write_logical_undo (*btid_int, *key, helper->obj_info, logical_undo_buffer, logical_undo);
+      key_record.get_logging_context ().set_active_undoredo_and_postpone (logical_undo, RVBT_MARK_DELETED,
+									  RVBT_DELETE_OBJECT_POSTPONE);
+      break;
+    default:
+      assert (false);
+      return ER_FAILED;
+    }
+
+  return key_record.mark_deleted_object (helper->obj_info);
 }
 
 int
@@ -36005,6 +36077,20 @@ btree_leaf_record::update_overflow_vpid (record_descriptor & record_copy, const 
                             DISK_VPID_ALIGNED_SIZE, membuf.get_ptr (), m_logger);
 }
 
+void
+btree_leaf_record::update_record (const btree_record_modify_function & mod_func)
+{
+  record_descriptor record_copy (m_record);
+  mod_func (m_record, m_logger);
+
+  if (spage_update (m_node_context.m_thread, m_node_context.m_page, m_slotid, &record_copy.get_recdes ()) != SP_SUCCESS)
+    {
+      assert (false);
+      return;
+    }
+  m_logger.log ();
+}
+
 const record_descriptor&
 btree_leaf_record::get_record (void) const
 {
@@ -36380,6 +36466,22 @@ btree_overflow_oids_record::init_new_page (cubthread::entry * thread_p, PAGE_PTR
     }
 }
 
+void
+btree_overflow_oids_record::update_record (const btree_record_modify_function & mod_func)
+{
+  record_descriptor record_copy (m_record);
+
+  mod_func (record_copy, m_logger);
+
+  if (spage_update (m_node_context.m_thread, m_node_context.m_page, RECORD_SLOTID, &record_copy.get_recdes ())
+      != SP_SUCCESS)
+    {
+      assert (false);
+      return;
+    }
+  m_logger.log ();
+}
+
 //
 //  btree_key_record
 //
@@ -36422,7 +36524,6 @@ btree_key_record::map_records (PGBUF_LATCH_MODE ovf_page_latch, const btree_reco
   return m_overflow_oids_record.map_records (ovf_page_latch, map_func);
 }
 
-
 int
 btree_key_record::search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_search & searcher)
 {
@@ -36448,6 +36549,69 @@ btree_key_record::search_object (PGBUF_LATCH_MODE ovf_latch_mode, btree_object_s
     }
 
   return NO_ERROR;
+}
+
+int
+btree_key_record::find_object (PGBUF_LATCH_MODE latch_mode, const OID & oid, const match_object_function & match_func,
+                               btree_object_location & location, bool & found)
+{
+  // search leaf record first
+  //
+  // use btree_map_record_objects; btree_object_mapper_function is required.
+  //
+  found = false;
+  btree_object_mapper_function obj_map_func =
+    [&] (const btree_object_info & obj, int offset_in_record, bool & stop) -> int
+    {
+      if (OID_EQ (&obj.oid, &oid) && match_func (obj.mvcc_info))
+        {
+          found = stop = true;
+          location.m_offset_in_record = offset_in_record;
+        }
+      return NO_ERROR;
+    };
+  if (btree_map_record_objects (m_leaf_record.m_node_context, m_leaf_record.m_record, m_leaf_record.m_offset_after_key,
+                                obj_map_func) != NO_ERROR)
+    {
+      assert (false);
+    }
+  if (found)
+    {
+      location.m_node = &m_leaf_record.m_node_context;
+      return NO_ERROR;
+    }
+
+  // search in overflow pages
+  //
+  // use m_overflow_oids_record.map_records and a btree_record_mapper_function
+  btree_record_mapper_function ovf_rec_map_func =
+    [&] (const btree_node_context &node_context, const record_descriptor & record, bool & stop) -> int
+    {
+      // first do a binary search for OID in page
+      bool found_oid_in_ovf_page;
+      m_overflow_oids_record.find_oid (oid, location.m_offset_in_record, found_oid_in_ovf_page);
+      if (found_oid_in_ovf_page)
+        {
+          // OID found; however, it is possible to have duplicate OID's and we need make sure this is the correct match
+          location.m_node = &node_context;
+
+          // unpack object
+          btree_object_info obj;
+          cubpacking::packer reader;
+          reader.init_for_unpacking (record.get_data () + location.m_offset_in_record,
+                                     record.get_size () - location.m_offset_in_record);
+          btree_packer_unpack_object (reader, location, obj);
+
+          assert (OID_EQ (&oid, &obj.oid));
+          if (match_func (obj.mvcc_info))
+            {
+              // this is matching
+              found = stop = true;
+            }
+        }
+      return NO_ERROR;
+    };
+  return m_overflow_oids_record.map_records (latch_mode, ovf_rec_map_func);
 }
 
 int
@@ -36483,6 +36647,70 @@ btree_key_record::append_object (btree_object_info & object)
 
   // could not append to any overflow page. create a new overflow OID's page and append there
   return create_overflow_page_and_append_object (object);
+}
+
+int
+btree_key_record::mark_deleted_object (btree_object_info & object)
+{
+  int error_code = NO_ERROR;
+  btree_object_location location;
+  bool found = false;
+  MVCCID found_insertid;
+
+  match_object_function match_func =
+    [&] (const btree_mvcc_info & mvcc_info) -> bool
+    {
+      // the object with no delete MVCCID
+      if (!btree_mvcc_info_is_delid_valid (&mvcc_info))
+        {
+          found_insertid = btree_mvcc_info_get_insid (&mvcc_info);
+          return true;
+        }
+      else
+        {
+          // if object is already deleted, it must be an older version that was not vacuumed yet
+          return false;
+        }
+    };
+  error_code = find_object (PGBUF_LATCH_WRITE, object.oid, match_func, location, found);
+  if (error_code != NO_ERROR)
+    {
+      return error_code;
+    }
+  if (!found)
+    {
+      assert (false);
+      return ER_FAILED;
+    }
+
+  // modify object to set delete MVCCID. first however, we need to preserve the insert MVCCID.
+  btree_mvcc_info_set_insid (&object.mvcc_info, found_insertid);
+
+  btree_record_modify_function update_func =
+    [&] (record_descriptor & record, btree_page_logger & page_logger) -> void
+    {
+      btree_record_replace_object (record, location, object, page_logger);
+    };
+  update_node_record (location.m_node, update_func);
+
+  return NO_ERROR;
+}
+
+void
+btree_key_record::update_node_record (const btree_node_context * m_node_p, const btree_record_modify_function & update_func)
+{
+  if (m_node_p == &m_leaf_record.m_node_context)
+    {
+      m_leaf_record.update_record (update_func);
+    }
+  else if (m_node_p == &m_overflow_oids_record.m_node_context)
+    {
+      m_overflow_oids_record.update_record (update_func);
+    }
+  else
+    {
+      assert (false);
+    }
 }
 
 bool
@@ -36712,6 +36940,12 @@ btree_logging_context::end_sysop ()
       log_sysop_end_logical_undo (thread_p, m_rcv_index, NULL, (int) m_logical_undo_data->get_current_size (),
                                   m_logical_undo_data->get_packer_buffer ());
       break;
+    case btree_logging_context::type::ACTIVE_UNDOREDO_AND_POSTPONE:
+      // log_append_postpone is currently bound to a page that we don't have here. if this case becomes possible,
+      // probably log_append_postpone must be modified too
+      assert (false);
+      log_sysop_abort (thread_p);
+      break;
     case btree_logging_context::type::ACTIVE_REDO:
       log_sysop_commit (thread_p);
       break;
@@ -36739,6 +36973,16 @@ btree_logging_context::set_active_undoredo (logical_undo_type& logical_undo, LOG
   m_type = type::ACTIVE_UNDOREDO;
   m_logical_undo_data = &logical_undo;
   m_rcv_index = rcvindex;
+}
+
+void
+btree_logging_context::set_active_undoredo_and_postpone (logical_undo_type& logical_undo, LOG_RCVINDEX rcvindex,
+                                                         LOG_RCVINDEX postpone_rcvindex)
+{
+  m_type = type::ACTIVE_UNDOREDO_AND_POSTPONE;
+  m_logical_undo_data = &logical_undo;
+  m_rcv_index = rcvindex;
+  m_postpone_rcv_index = postpone_rcvindex;
 }
 
 void
@@ -36845,6 +37089,14 @@ btree_page_logger::log (size_t redo_size, const char *redo_data)
         log_append_undoredo_data (thread_p, m_context.m_rcv_index, &m_addr,
                                   (int) m_context.m_logical_undo_data->get_current_size (),
                                   (int) redo_size, m_context.m_logical_undo_data->get_packer_buffer (), redo_data);
+        break;
+      case btree_logging_context::type::ACTIVE_UNDOREDO_AND_POSTPONE:
+        log_append_undoredo_data (thread_p, m_context.m_rcv_index, &m_addr,
+                                  (int) m_context.m_logical_undo_data->get_current_size (),
+                                  (int) redo_size, m_context.m_logical_undo_data->get_packer_buffer (), redo_data);
+        log_append_postpone (thread_p, m_context.m_postpone_rcv_index, &m_addr,
+                             (int) m_context.m_logical_undo_data->get_current_size (),
+                             m_context.m_logical_undo_data->get_packer_buffer ());
         break;
       case btree_logging_context::type::ACTIVE_REDO:
         log_append_redo_data (thread_p, RVBT_RECORD_MODIFY_NO_UNDO, &m_addr, (int) redo_size, redo_data);
