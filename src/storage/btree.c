@@ -1283,6 +1283,27 @@ struct btree_object_search
 //
 //        Leaf node part of a b-tree record and all related functionality
 //
+//    TODO: All this "first leaf object" fuss complicates things unnecessarily. We should consider a different format,
+//          by serializing key first, and then adding other info and/or objects.
+//          The format would have two cases:
+//
+//          case 1: a single key object
+//          { packed_key_or_overflow_key_vpid } { 8-32 byte object info }
+//
+//          case 2: multiple objects
+//          { packed_key_or_overflow_key_vpid } { 8-? byte control field } { [ 8-32 byte object info ] ... }
+//
+//          to differentiate between cases, the sign bit is set in the control field case, and not set in the object
+//          info case.
+//
+//          we would have minimum storage overhead in most cases.
+//
+//          we may easily customize control field without changing the whole key format. we may include whatever
+//          information is necessary here, and use bit sets to find out what is stored.
+//
+//          for instance, we can store here overflow vpid. or we may add info that is not currently stored, like
+//          object count, offset to last object so on.
+//
 class btree_leaf_record
 {
 public:
@@ -1301,8 +1322,15 @@ public:
   void set_overflow_vpid (const VPID & vpid);
 
   void update_record (const btree_record_modify_function & mod_func);
+  bool has_one_object (void);
+  void get_last_object (btree_object_info & object, btree_object_location & location);
 
 private:
+  // only constructible as part of btree_key_record
+  friend btree_key_record;
+  btree_leaf_record (const btree_node_context& leaf_context, PGSLOTID slotid, btree_logging_context & sysop_tracker);
+  btree_leaf_record () = delete;
+
   void get_first_object (btree_object_info & first_object);
   void update_first_object (std::function<void (btree_object_info &)> & func_updater, record_descriptor & record);
 
@@ -1310,10 +1338,7 @@ private:
   void delete_overflow_vpid (record_descriptor & record_copy);
   void update_overflow_vpid (record_descriptor & record_copy, const VPID & vpid);
 
-  // only constructible as part of btree_key_record
-  friend btree_key_record;
-  btree_leaf_record (const btree_node_context& leaf_context, PGSLOTID slotid, btree_logging_context & sysop_tracker);
-  btree_leaf_record () = delete;
+  std::size_t get_objects_end_offset ();
 
   const btree_node_context& m_node_context;
   PGSLOTID m_slotid;
@@ -1373,6 +1398,11 @@ private:
   btree_page_logger m_logger;
 };
 
+// btree_key_record - most important class to process an index key record
+//
+// TODO - btree_key_record is currently initialized in b-tree leaf functions based on insert and delete helpers.
+//        it can be initialized by "advance" function to avoid reading record twice.
+//
 class btree_key_record
 {
 public:
@@ -1388,6 +1418,8 @@ public:
 
   int append_object (btree_object_info & object);
   int mark_deleted_object (btree_object_info & object);
+  int vacuum_object (btree_object_info & object);
+  int vacuum_insid (btree_object_info & object);
 
   bool has_overflow_oids () const;
   PGSLOTID get_slotid () const;
@@ -1403,6 +1435,10 @@ private:
 
   int find_object (PGBUF_LATCH_MODE latch_mode, const OID & oid, const match_object_function & match_func,
                    btree_object_location & location, bool & found);
+  int delete_object_from_key (const btree_object_location & location);
+
+  void delete_object_from_record (const btree_object_location & location);
+  void replace_object_in_record (const btree_object_location & location, btree_object_info & object);
 
   void update_node_record (const btree_node_context * m_node_p, const btree_record_modify_function & update_func);
 
@@ -1426,6 +1462,8 @@ static void btree_record_insert_data (record_descriptor & record, size_t offset,
                                       btree_page_logger & logger);
 static bool btree_record_can_append_object (const btree_node_context & node_context, const record_descriptor & record,
                                             size_t offset_after_key = 0);
+static size_t btree_record_get_object_count (const btree_node_context & node_context, const record_descriptor & record,
+                                             size_t offset_after_key = 0);
 
 // *INDENT-ON*
 //////////////////////////////////////////////////////////////////////////
@@ -35330,6 +35368,71 @@ btree_leaf_insert_delete_mvccid (THREAD_ENTRY * thread_p, BTID_INT * btid_int, D
   return key_record.mark_deleted_object (helper->obj_info);
 }
 
+// replaces btree_key_delete_remove_object - vacuum object
+static int
+btree_leaf_vacuum_object (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_VALUE * key, PAGE_PTR * leaf_page,
+			  BTREE_SEARCH_KEY_HELPER * search_key, bool * restart, void *other_args)
+{
+  assert (thread_p != NULL);
+  assert (btid_int != NULL);
+  assert (key != NULL);
+  assert (leaf_page != NULL);
+  assert (search_key != NULL);
+  assert (restart != NULL);
+  assert (other_args != NULL);
+
+  int error_code = NO_ERROR;
+
+  btree_delete_helper *helper = REINTERPRET_CAST (btree_delete_helper *, other_args);
+
+  btree_perf_track_traverse_time (thread_p, helper);
+
+  if (search_key->result != BTREE_KEY_FOUND)
+    {
+      // it is possible when vacuuming
+      return NO_ERROR;
+    }
+
+  // init leaf context and logger
+  btree_node_context leaf_context (*thread_p, *btid_int, *leaf_page, BTREE_LEAF_NODE);
+
+  btree_key_record key_record (leaf_context, *key, *search_key, helper->log_operations);
+  key_record.get_logging_context ().set_active_redo ();
+
+  return key_record.vacuum_object (helper->object_info);
+}
+
+static int
+btree_leaf_vacuum_insert_mvccid (THREAD_ENTRY * thread_p, BTID_INT * btid_int, DB_VALUE * key, PAGE_PTR * leaf_page,
+				 BTREE_SEARCH_KEY_HELPER * search_key, bool * restart, void *other_args)
+{
+  assert (thread_p != NULL);
+  assert (btid_int != NULL);
+  assert (key != NULL);
+  assert (leaf_page != NULL);
+  assert (search_key != NULL);
+  assert (restart != NULL);
+  assert (other_args != NULL);
+
+  int error_code = NO_ERROR;
+
+  btree_delete_helper *helper = REINTERPRET_CAST (btree_delete_helper *, other_args);
+
+  btree_perf_track_traverse_time (thread_p, helper);
+
+  if (search_key->result != BTREE_KEY_FOUND)
+    {
+      // it is possible when vacuuming
+      return NO_ERROR;
+    }
+
+  // init leaf context and logger
+  btree_node_context leaf_context (*thread_p, *btid_int, *leaf_page, BTREE_LEAF_NODE);
+
+  btree_key_record key_record (leaf_context, *key, *search_key, helper->log_operations);
+  key_record.get_logging_context ().set_active_redo ();
+}
+
 int
 btree_rv_redo_init_overflow_page (THREAD_ENTRY * thread_p, LOG_RCV * recv)
 {
@@ -36091,6 +36194,58 @@ btree_leaf_record::update_record (const btree_record_modify_function & mod_func)
   m_logger.log ();
 }
 
+std::size_t
+btree_leaf_record::get_objects_end_offset ()
+{
+  size_t offset = m_record.get_size ();
+  if (!VPID_ISNULL (&m_info.ovfl))
+    {
+      offset -= DISK_VPID_ALIGNED_SIZE;
+    }
+  return offset;
+}
+
+bool
+btree_leaf_record::has_one_object ()
+{
+  return m_offset_after_key == get_objects_end_offset ();
+}
+
+void
+btree_leaf_record::get_last_object (btree_object_info & object, btree_object_location & location)
+{
+  size_t end_offset = get_objects_end_offset ();
+  size_t oids_size = OR_OID_SIZE;
+  if (location.m_node->is_unique ())
+    {
+      // class is stored too
+      oids_size += OR_OID_SIZE;
+    }
+  size_t mvccids_size;
+  size_t last_object_offset;
+  
+  for (size_t offset_in_record = m_offset_after_key; offset_in_record < end_offset; /* updated inside loop */)
+    {
+      last_object_offset = offset_in_record;
+
+      // get mvcc info size
+      mvccids_size =
+        btree_get_mvcc_info_size_from_flags (btree_record_object_get_mvcc_flags (m_record.get_data ()
+                                                                                 + offset_in_record));
+
+      // skip to next
+      offset_in_record += oids_size + mvccids_size;
+    }
+
+  // save location
+  location.set_location (m_node_context, last_object_offset);
+  // unpack object
+  cubpacking::packer reader;
+  reader.init_for_unpacking (m_record.get_data () + last_object_offset, end_offset - last_object_offset);
+  btree_packer_unpack_object (reader, location, object);
+  assert (reader.is_ended ());
+}
+
 const record_descriptor&
 btree_leaf_record::get_record (void) const
 {
@@ -36615,6 +36770,107 @@ btree_key_record::find_object (PGBUF_LATCH_MODE latch_mode, const OID & oid, con
 }
 
 int
+btree_key_record::delete_object_from_key (const btree_object_location & location)
+{
+  //  how to
+  //  this is a complicated story
+  //
+  //  we have multiple cases. let's start easy:
+  //    1. object is not first in leaf nor last in an overflow page. it is removed and the story ends here.
+  //    2. object is first in leaf. we cannot just remove, we have to replace it with something.
+  //      2.1. if there are other objects in leaf record, just replace with last leaf record object.
+  //      2.2. if there are no other objects in leaf record, but we have at least one overflow object, pop first
+  //           overflow object and replace first leaf record object; note - this case can get more complicated if
+  //           the popped object is also the only one in its overflow page (see step 3).
+  //    3. object is last in an overflow page. the page must be removed.
+  //      3.1. if page is first overflow page, link in leaf record must be updated.
+  //      3.2. if page is not first overflow page, link in previous overflow page must be updated.
+  //
+
+  // let's start with the first case:
+  bool is_simple_remove = false;
+
+  if (location.m_node->m_node_type == BTREE_LEAF_NODE)
+    {
+      is_simple_remove = !location.is_first_of_leaf ();
+    }
+  else
+    {
+      // overflow
+      // must have more than one object.
+      is_simple_remove =
+        btree_record_get_object_count (m_overflow_oids_record.m_node_context, m_overflow_oids_record.m_record) > 0;
+    }
+
+  if (is_simple_remove)
+    {
+      // case 1
+      delete_object_from_record (location);
+      return NO_ERROR;
+    }
+
+  if (location.m_node->m_node_type == BTREE_LEAF_NODE)
+    {
+      assert (location.is_first_of_leaf ());
+
+      // case 2
+      if (m_leaf_record.m_offset_after_key > m_leaf_record.m_record.get_size ())
+        {
+          // case 2.1
+          // pop last object and use it to replace first
+          btree_object_info last_object;
+          btree_object_location last_location;
+          m_leaf_record.get_last_object (last_object, last_location);
+
+          // update leaf record
+          btree_record_modify_function update_func =
+            [&] (record_descriptor & record, btree_page_logger & page_logger) -> void
+            {
+              // remove last object
+              btree_record_delete_object (record, last_location, page_logger);
+              // replace first object with last
+              btree_record_replace_object (record, location, last_object, page_logger);
+            };
+          m_leaf_record.update_record (update_func);
+
+          return NO_ERROR;
+        }
+      else
+        {
+          // case 2.2
+          // todo
+          return NO_ERROR;
+        }
+    }
+
+  // case 3
+  // todo
+  return NO_ERROR;
+}
+
+void
+btree_key_record::replace_object_in_record (const btree_object_location & location, btree_object_info & object)
+{
+  btree_record_modify_function update_func =
+    [&] (record_descriptor & record, btree_page_logger & page_logger) -> void
+    {
+      btree_record_replace_object (record, location, object, page_logger);
+    };
+  update_node_record (location.m_node, update_func);
+}
+
+void
+btree_key_record::delete_object_from_record (const btree_object_location & location)
+{
+  btree_record_modify_function update_func =
+    [&] (record_descriptor & record, btree_page_logger & page_logger) -> void
+    {
+      btree_record_delete_object (record, location, page_logger);
+    };
+  update_node_record (location.m_node, update_func);
+}
+
+int
 btree_key_record::append_object (btree_object_info & object)
 {
   int error_code = NO_ERROR;
@@ -36689,6 +36945,86 @@ btree_key_record::mark_deleted_object (btree_object_info & object)
   btree_record_modify_function update_func =
     [&] (record_descriptor & record, btree_page_logger & page_logger) -> void
     {
+      btree_record_replace_object (record, location, object, page_logger);
+    };
+  update_node_record (location.m_node, update_func);
+
+  return NO_ERROR;
+}
+
+int
+btree_key_record::vacuum_object (btree_object_info & object)
+{
+  int error_code = NO_ERROR;
+  btree_object_location location;
+  bool found = false;
+  MVCCID match_delid = btree_mvcc_info_get_delid (&object.mvcc_info);
+
+  match_object_function match_func =
+    [&] (const btree_mvcc_info & mvcc_info) -> bool
+    {
+      // delid must match exactly!
+      return btree_mvcc_info_get_delid (&mvcc_info) == match_delid;
+    };
+  error_code = find_object (PGBUF_LATCH_WRITE, object.oid, match_func, location, found);
+  if (error_code != NO_ERROR)
+    {
+      return error_code;
+    }
+
+  if (!found)
+    {
+      // it is possible for vacuum; e.g. object was deleted but operation was rollbacked. vacuum is not aware and will
+      // try to do its job anyway
+      return NO_ERROR;
+    }
+  // just delete object
+  return delete_object_from_key (location);
+}
+
+int
+btree_key_record::vacuum_insid (btree_object_info & object)
+{
+  int error_code = NO_ERROR;
+  btree_object_location location;
+  bool found = false;
+  MVCCID match_insid = btree_mvcc_info_get_insid (&object.mvcc_info);
+  MVCCID found_delid = MVCCID_NULL;
+
+  match_object_function match_func =
+    [&] (const btree_mvcc_info & mvcc_info) -> bool
+    {
+      // insert MVCCID must match exactly!
+      if (btree_mvcc_info_get_insid (&mvcc_info) == match_insid)
+        {
+          found_delid = btree_mvcc_info_get_delid (&mvcc_info);
+          return true;
+        }
+      else
+        {
+          return false;
+        }
+    };
+  error_code = find_object (PGBUF_LATCH_WRITE, object.oid, match_func, location, found);
+  if (error_code != NO_ERROR)
+    {
+      return error_code;
+    }
+
+  if (!found)
+    {
+      // it is possible; nothing to do
+      return NO_ERROR;
+    }
+
+  // we need to update object and its info. the "update" is actually to remove insert MVCCID and keep previous delete
+  // MVCCID
+  btree_mvcc_info_set_delid (&object.mvcc_info, found_delid);
+  btree_mvcc_info_clear_insid (&object.mvcc_info);
+  btree_record_modify_function update_func =
+    [&] (record_descriptor & record, btree_page_logger & page_logger) -> void
+    {
+      // update object
       btree_record_replace_object (record, location, object, page_logger);
     };
   update_node_record (location.m_node, update_func);
