@@ -1202,6 +1202,8 @@ private:
   LOG_RCVINDEX m_rcv_index;           // used for active logging
   LOG_RCVINDEX m_postpone_rcv_index;  // used by ACTIVE_UNDOREDO_AND_POSTPONE
   logical_undo_type* m_logical_undo_data;
+
+  bool m_is_finished;
 };
 
 class btree_page_logger
@@ -1217,8 +1219,10 @@ public:
   
   void set_rv_record_change (log_rv_record_change mode);
   void set_rv_btree_flag (btree_rv_flag flag);
+  void set_address (const btree_node_context & node_context, PGSLOTID slotid);
 
   const log_lsa& get_prev_lsa (void);
+  btree_logging_context& get_logging_context ();
 
   void log (void);
   void log (size_t redo_size, const char *redo_data);
@@ -1240,6 +1244,8 @@ private:
   
   btree_logging_context& m_context;
   log_lsa m_prev_lsa;
+
+  bool is_finished;
 };
 
 struct btree_object_location
@@ -1377,6 +1383,8 @@ public:
 
   void update_record (const btree_record_modify_function & mod_func);
 
+  int delete_object (const btree_object_location & location);
+
 private:
   // only constructible as part of btree_key_record
   friend btree_key_record;
@@ -1394,6 +1402,7 @@ private:
   btree_node_context m_node_context;
   record_descriptor m_record;
   VPID m_first_overflow_vpid;
+  VPID m_prev_vpid;
   VPID m_next_vpid;
   btree_page_logger m_logger;
 };
@@ -36294,11 +36303,13 @@ void
 btree_overflow_oids_record::iterate_start (void)
 {
   m_node_context.m_vpid = m_first_overflow_vpid;
+  VPID_SET_NULL (&m_prev_vpid);
 }
 
 void
 btree_overflow_oids_record::iterate_next (void)
 {
+  m_prev_vpid = m_node_context.m_vpid;
   m_node_context.m_vpid = m_next_vpid;
 }
 
@@ -36361,6 +36372,7 @@ btree_overflow_oids_record::clear_overflow_context (void)
       pgbuf_unfix_and_init (m_node_context.m_thread, m_node_context.m_page);
     }
   VPID_SET_NULL (&m_node_context.m_vpid);
+  VPID_SET_NULL (&m_prev_vpid);
 }
 
 const btree_node_context &
@@ -36637,6 +36649,43 @@ btree_overflow_oids_record::update_record (const btree_record_modify_function & 
   m_logger.log ();
 }
 
+int
+btree_overflow_oids_record::delete_object (const btree_object_location & location)
+{
+  std::size_t object_size;
+
+  if (m_record.get_size () > object_size)
+    {
+      // just remove
+      btree_record_modify_function recmod_func =
+        [&] (record_descriptor & record, btree_page_logger & page_logger) -> void
+        {
+          btree_record_delete_object (record, location, m_logger);
+        };
+      update_record (recmod_func);
+    }
+  else
+    {
+      // we need to delete the whole page!
+      // system operation is required
+      m_logger.get_logging_context ().start_sysop ();
+
+      // update link in previous page
+      if (VPID_ISNULL (&m_prev_vpid))
+        {
+          // first page... just update m_first_overflow_vpid and the key record will update link in leaf.
+          m_first_overflow_vpid = m_next_vpid;
+        }
+      else
+        {
+          // update link in previous page
+          
+        }
+      
+      m_logger.get_logging_context ().end_sysop ();
+    }
+}
+
 //
 //  btree_key_record
 //
@@ -36838,7 +36887,29 @@ btree_key_record::delete_object_from_key (const btree_object_location & location
       else
         {
           // case 2.2
-          // todo
+          // pop last object from first overflow page.
+          btree_object_info last_object;
+          btree_object_location last_location;
+
+          // make sure overflow context is clear
+          m_overflow_oids_record.clear_overflow_context ();
+
+          btree_record_mapper_function map_func =
+            [&] (const btree_node_context &node_context, const record_descriptor & record, bool & stop) -> int
+            {
+              // get last object
+              std::size_t object_size = BTREE_OBJECT_FIXED_SIZE (node_context.m_btinfo);
+              std::size_t last_object_offset = record.get_size () - object_size;
+              last_location.set_location (node_context, last_object_offset);
+              cubpacking::packer reader;
+              reader.init_for_unpacking (record.get_data () + last_object_offset, object_size);
+              btree_packer_unpack_object (reader, location, last_object);
+              assert (reader.is_ended ());
+
+              // stop
+              stop = true;
+            };
+          m_overflow_oids_record.map_records (PGBUF_LATCH_WRITE, map_func);
           return NO_ERROR;
         }
     }
@@ -37230,7 +37301,7 @@ btree_key_record::create_overflow_page_and_append_object (btree_object_info & ob
 btree_logging_context::btree_logging_context ()
   : m_sysop_level (0)
 {
-  //
+  m_is_finished = false;
 }
 
 btree_logging_context::~btree_logging_context ()
@@ -37245,6 +37316,7 @@ btree_logging_context::~btree_logging_context ()
 void
 btree_logging_context::start_sysop ()
 {
+  assert (!m_is_finished);
   if (m_sysop_level++ == 0)
     {
       log_sysop_start (&cubthread::get_entry ());
@@ -37295,6 +37367,8 @@ btree_logging_context::end_sysop ()
       assert (false);
       break;
     }
+
+  m_is_finished = true;
 }
 
 bool
@@ -37350,17 +37424,7 @@ btree_page_logger::btree_page_logger (btree_logging_context & logging_context, c
   : m_context (logging_context)
 {
   m_addr.vfid = NULL;   // does not matter
-  m_addr.pgptr = node_context.m_page;
-  m_addr.offset = slotid;
-
-  if (node_context.m_node_type == BTREE_OVERFLOW_NODE)
-    {
-      BTREE_RV_SET_OVERFLOW_NODE (&m_addr);
-    }
-  else
-    {
-      m_addr.offset = slotid;
-    }
+  set_address (node_context, slotid);
 
   LSA_SET_NULL (&m_prev_lsa);
 }
@@ -37389,10 +37453,28 @@ btree_page_logger::set_rv_btree_flag (btree_rv_flag flag)
   m_addr.offset |= flag;
 }
 
+void
+btree_page_logger::set_address (const btree_node_context & node_context, PGSLOTID slotid)
+{
+  m_addr.pgptr = node_context.m_page;
+  m_addr.offset = slotid;
+
+  if (node_context.m_node_type == BTREE_OVERFLOW_NODE)
+    {
+      BTREE_RV_SET_OVERFLOW_NODE (&m_addr);
+    }
+}
+
 const log_lsa &
 btree_page_logger::get_prev_lsa (void)
 {
   return m_prev_lsa;
+}
+
+btree_logging_context &
+btree_page_logger::get_logging_context ()
+{
+  return m_context;
 }
 
 void
@@ -37404,6 +37486,8 @@ btree_page_logger::log (void)
 void
 btree_page_logger::log (size_t redo_size, const char *redo_data)
 {
+  assert (!m_context.m_is_finished);
+
   LSA_COPY (&m_prev_lsa, pgbuf_get_lsa (m_addr.pgptr));
 
   cubthread::entry *thread_p = &cubthread::get_entry ();
@@ -37451,6 +37535,8 @@ btree_page_logger::log (size_t redo_size, const char *redo_data)
         assert (false);
         break;
       }
+
+      m_context.m_is_finished = true;
     }
 
   pgbuf_set_dirty (thread_p, m_addr.pgptr, DONT_FREE);
