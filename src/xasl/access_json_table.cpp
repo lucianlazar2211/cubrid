@@ -104,14 +104,22 @@ namespace cubxasl
     }
 
     column::column (void)
-      : m_domain (NULL)
-      , m_column_name ()
-      , m_on_error ()
-      , m_on_empty ()
-      , m_output_value_pointer (NULL)
-      , m_function (json_table_column_function::JSON_TABLE_EXTRACT)
     {
-      //
+      init ();
+    }
+
+    void
+    column::init ()
+    {
+      m_domain = NULL;
+      m_path = NULL;
+      m_column_name = NULL;
+      m_output_value_pointer = NULL;
+      m_function = json_table_column_function::JSON_TABLE_EXTRACT;
+      m_on_error.m_default_value = NULL;
+      m_on_error.m_behavior = json_table_column_behavior_type::JSON_TABLE_RETURN_NULL;
+      m_on_empty.m_default_value = NULL;
+      m_on_empty.m_behavior = json_table_column_behavior_type::JSON_TABLE_RETURN_NULL;
     }
 
     int
@@ -121,7 +129,7 @@ namespace cubxasl
       JSON_DOC *docp = NULL;
       TP_DOMAIN_STATUS status_cast = TP_DOMAIN_STATUS::DOMAIN_COMPATIBLE;
 
-      error_code = db_json_extract_document_from_path (&input, m_path, docp);
+      error_code = db_json_extract_document_from_path (&input, std::vector<std::string> (1, m_path), docp);
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
@@ -138,6 +146,9 @@ namespace cubxasl
 	    }
 	  return error_code;
 	}
+
+      // clear previous output_value
+      pr_clear_value (m_output_value_pointer);
 
       if (db_make_json (m_output_value_pointer, docp, true) != NO_ERROR)
 	{
@@ -165,7 +176,7 @@ namespace cubxasl
       bool result = false;
       TP_DOMAIN_STATUS status_cast = TP_DOMAIN_STATUS::DOMAIN_COMPATIBLE;
 
-      error_code = db_json_contains_path (&input, m_path, result);
+      error_code = db_json_contains_path (&input, std::vector<std::string> (1, m_path), false, result);
       if (error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
@@ -187,8 +198,6 @@ namespace cubxasl
     int
     column::evaluate_ordinality (size_t ordinality)
     {
-      TP_DOMAIN_STATUS status_cast = TP_DOMAIN_STATUS::DOMAIN_COMPATIBLE;
-
       assert (m_domain->type->id == DB_TYPE_INTEGER);
 
       db_make_int (m_output_value_pointer, ordinality);
@@ -225,106 +234,90 @@ namespace cubxasl
     }
 
     node::node (void)
-      : m_ordinality (1)
-      , m_need_inc_ordinality (true)
-      , m_id (0)
-      , m_expand_type (json_table_expand_type::JSON_TABLE_NO_EXPAND)
-      , m_iterator (nullptr)
     {
-
+      init ();
     }
 
     void
-    node::clear_columns ()
+    node::init ()
+    {
+      m_path = NULL;
+      m_ordinality = 1;
+      m_output_columns = NULL;
+      m_output_columns_size = 0;
+      m_nested_nodes = NULL;
+      m_nested_nodes_size = 0;
+      m_id = 0;
+      m_iterator = NULL;
+      m_is_iterable_node = false;
+    }
+
+    void
+    node::clear_columns (bool is_final_clear)
     {
       for (size_t i = 0; i < m_output_columns_size; ++i)
 	{
-	  (void) pr_clear_value (m_output_columns[i].m_output_value_pointer);
-	  (void) db_make_null (m_output_columns[i].m_output_value_pointer);
+	  column *output_column = &m_output_columns[i];
+	  if (is_final_clear)
+	    {
+	      (void) pr_clear_value (output_column->m_on_empty.m_default_value);
+	      (void) pr_clear_value (output_column->m_on_error.m_default_value);
+	    }
+
+	  (void) pr_clear_value (output_column->m_output_value_pointer);
+	  (void) db_make_null (output_column->m_output_value_pointer);
 	}
     }
 
     void
-    node::clear_iterators ()
+    node::clear_iterators (bool is_final_clear)
     {
-      if (m_iterator != nullptr)
+      if (is_final_clear)
+	{
+	  db_json_delete_json_iterator (m_iterator);
+	}
+      else
 	{
 	  db_json_clear_json_iterator (m_iterator);
 	}
 
       for (size_t i = 0; i < m_nested_nodes_size; ++i)
 	{
-	  m_nested_nodes[i].clear_iterators ();
+	  m_nested_nodes[i].clear_iterators (is_final_clear);
 	}
     }
 
     void
-    node::clear_tree (void)
+    node::clear_tree (bool is_final_clear)
     {
-      clear_columns ();
+      clear_columns (is_final_clear);
 
       for (size_t i = 0; i < m_nested_nodes_size; ++i)
 	{
-	  m_nested_nodes[i].clear_tree ();
-	}
-    }
-
-    bool
-    node::str_ends_with (const std::string &str, const std::string &end)
-    {
-      return end.size () <= str.size () && str.compare (str.size () - end.size (), end.size (), end) == 0;
-    }
-
-    bool
-    node::check_need_expand () const
-    {
-      return m_expand_type != json_table_expand_type::JSON_TABLE_NO_EXPAND;
-    }
-
-    void
-    node::set_parent_path ()
-    {
-      if (!check_need_expand ())
-	{
-	  assert (false);
-	  return;
-	}
-
-      if (m_expand_type == json_table_expand_type::JSON_TABLE_ARRAY_EXPAND)
-	{
-	  std::string s (m_path);
-	  s.assign (s.substr (0, s.size () - 3));
-
-	  // will only shrink
-
-	  strcpy (m_path, s.c_str ());
-	  m_path[s.size ()] = 0;
-	}
-      else if (m_expand_type == json_table_expand_type::JSON_TABLE_OBJECT_EXPAND)
-	{
-	  std::string s (m_path);
-	  s.assign (s.substr (0, s.size () - 2));
-
-	  // will only shrink
-	  strcpy (m_path, s.c_str ());
-	  m_path[s.size ()] = 0;
+	  m_nested_nodes[i].clear_tree (is_final_clear);
 	}
     }
 
     void
     node::init_iterator ()
     {
-      if (check_need_expand ())
+      if (m_is_iterable_node)
 	{
-	  if (m_expand_type == json_table_expand_type::JSON_TABLE_ARRAY_EXPAND)
-	    {
-	      m_iterator = db_json_create_iterator (DB_JSON_TYPE::DB_JSON_ARRAY);
-	    }
-	  else if (m_expand_type == json_table_expand_type::JSON_TABLE_OBJECT_EXPAND)
-	    {
-	      m_iterator = db_json_create_iterator (DB_JSON_TYPE::DB_JSON_OBJECT);
-	    }
+	  m_iterator = db_json_create_iterator (DB_JSON_TYPE::DB_JSON_ARRAY);
 	}
+    }
+
+    spec_node::spec_node ()
+    {
+      init ();
+    }
+
+    void
+    spec_node::init ()
+    {
+      m_root_node = NULL;
+      m_json_reguvar = NULL;
+      m_node_count = 0;
     }
 
   } // namespace json_table
