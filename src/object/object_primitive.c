@@ -9975,14 +9975,14 @@ pr_valstring (THREAD_ENTRY * threade, DB_VALUE * val)
     {
       /* space with terminating NULL */
       sb ("(null)");
-      return sb.move_ptr ();
+      return sb.release_ptr ();
     }
 
   if (DB_IS_NULL (val))
     {
       /* space with terminating NULL */
       sb ("NULL");
-      return sb.move_ptr ();
+      return sb.release_ptr ();
     }
 
   DB_TYPE dbval_type = DB_VALUE_DOMAIN_TYPE (val);
@@ -9994,7 +9994,7 @@ pr_valstring (THREAD_ENTRY * threade, DB_VALUE * val)
     }
 
   (*(pr_type->sptrfunc)) (val, sb);
-  return sb.move_ptr ();	//caller should use db_private_free() to deallocate it
+  return sb.release_ptr ();	//caller should use db_private_free() to deallocate it
 }
 #endif //defined (SERVER_MODE) || defined (SA_MODE)
 

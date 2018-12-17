@@ -17,7 +17,17 @@
  */
 
 /*
- * mem_block.hpp - Memory Management Functionality
+ * mem_block.hpp - Memory Block Functionality
+ *
+ *  Memory Block is defined as a contiguous memory buffer.
+ *
+ *  Glossary:
+ *
+ *    block - the pair of memory pointer and size.
+ *    stack block - a block on stack memory
+ *    heap block - a block on heap memory; does not have its own structure (a simple block can be used).
+ *    extensible block - a block that can be extended when required
+ *    extensible stack block - a block that starts as a stack block and can be extended to a heap block.
  */
 
 #ifndef _MEM_BLOCK_HPP_
@@ -26,8 +36,14 @@
 #include <memory.h>
 #include <functional>
 
+#include <cinttypes>
+
 namespace mem
 {
+  const size_t DEFAULT_ALIGNMENT = 8;
+  template <typename T>
+  inline T *ptr_align (T *ptr);
+
   /*
    * Memory Block
    * - groups together memory address and its size
@@ -38,67 +54,265 @@ namespace mem
   struct block
   {
       size_t dim;
-      char  *ptr;
+      char *ptr;
 
-      block ()
-	: dim {0}
-	, ptr {NULL}
-      {
-      }
+      inline block ();
+      inline block (size_t dim, void *ptr);
+      inline block (block &&b);             //move ctor
 
-      block (block &&b)             //move ctor
-	: dim {b.dim}
-	, ptr {b.ptr}
-      {
-	b.dim = 0;
-	b.ptr = NULL;
-      }
+      inline block &operator= (block &&b);  //move assign
 
-      block &operator= (block &&b)  //move assign
-      {
-	if (this != &b)
-	  {
-	    dim = b.dim;
-	    ptr = b.ptr;
-	    b.dim = 0;
-	    b.ptr = NULL;
-	  }
-	return *this;
-      }
+      inline bool is_valid () const;
 
-      block (size_t dim, void *ptr)
-	: dim {dim}
-	, ptr { (char *) ptr}
-      {
-      }
-
-      virtual ~block ()
-      {
-	dim = 0;
-	ptr = NULL;
-      }
-
-      bool is_valid ()
-      {
-	return (dim != 0 && ptr != NULL);
-      }
-
-      char *move_ptr ()                                    //NOT RECOMMENDED! use move semantics: std::move()
-      {
-	char *p = ptr;
-
-	dim = 0;
-	ptr = NULL;
-
-	return p;
-      }
+      inline char *move_ptr ();                                    //NOT RECOMMENDED! use move semantics: std::move()
 
     private:
       block (const block &) = delete;
       block &operator= (const block &) = delete;
   };
 
-  inline void default_realloc (block &b, size_t len)
+  template <size_t S>
+  class stack_block
+  {
+    public:
+      static const size_t SIZE = S;
+
+      stack_block (void) = default;
+      char *get_ptr (void)
+      {
+	return m_buf;
+      }
+      const block get_block (void)
+      {
+	return block (m_buf, SIZE);
+      }
+
+    private:
+      union
+      {
+	char m_buf[SIZE];
+	std::int64_t dummy;
+      };
+  };
+
+  /* Memory Block - Extensible
+   * - able to extend/reallocate to accommodate additional bytes
+   * - owns the memory by default and it will free the memory in destructor unless it is moved:
+   *    {
+   *        mem::block_ext block{some_realloc, some_dealloc};//some_realloc/dealloc = functions, functors or lambdas
+   *        //...
+   *        //move it or it will be deallocated; simple copy => compiler error because it is not designed to be copied
+   *        mem::block b = std::move(block);
+   *    }
+   */
+  struct extensible_block : public block
+  {
+      inline extensible_block ();                                          //default ctor
+      inline extensible_block (extensible_block &&b);                             //move ctor
+      inline extensible_block (std::function<void (block &b, size_t n)> extend,
+			       std::function<void (block &b)> dealloc);    //general ctor
+      inline ~extensible_block ();                                         //dtor
+
+      inline extensible_block &operator= (extensible_block &&b);                  //move assignment
+
+      inline void extend_by (size_t additional_bytes);
+      inline void extend_to (size_t total_bytes)
+      {
+	if (total_bytes <= dim)
+	  {
+	    return;
+	  }
+	extend_by (total_bytes - dim);
+      }
+
+      char *get_ptr () const
+      {
+	return ptr;
+      }
+
+      std::size_t get_size () const
+      {
+	return dim;
+      }
+
+      char *release_ptr ()
+      {
+	char *ret_ptr = ptr;
+	ptr = NULL;
+	return ret_ptr;
+      }
+
+    private:
+      std::function<void (block &b, size_t n)> m_extend;  //extend memory block to fit at least additional n bytes
+      std::function<void (block &b)> m_dealloc;           //deallocate memory block
+
+      extensible_block (const extensible_block &) = delete;             //copy ctor
+      extensible_block &operator= (const extensible_block &) = delete;  //copy assignment
+  };
+
+  template <size_t S>
+  class extensible_stack_block
+  {
+    public:
+
+      void extend_by (size_t additional_bytes)
+      {
+	if (m_ext_block.ptr == NULL)
+	  {
+	    m_ext_block.extend_to (m_stack.SIZE + additional_bytes);
+	  }
+      }
+
+      void extend_to (size_t total_bytes)
+      {
+	if (total_bytes <= m_stack.SIZE)
+	  {
+	    return;
+	  }
+	m_ext_block.extend_to (total_bytes);
+      }
+
+    private:
+      stack_block<S> m_stack;
+      extensible_block m_ext_block;
+  };
+  // todo extensible_block is a extensible_stack_block with S = 0
+
+  //
+  // other functions
+  //
+  inline void default_realloc (block &b, size_t len);
+  inline void default_dealloc (block &b);
+
+} // namespace mem
+
+//////////////////////////////////////////////////////////////////////////
+// inline/template implementation
+//////////////////////////////////////////////////////////////////////////
+
+namespace mem
+{
+  //
+  // alignment
+  //
+  template <typename T>
+  T *
+  ptr_align (T *ptr)
+  {
+    std::uintptr_t pt = (std::uintptr_t) ptr;
+    pt = (pt + DEFAULT_ALIGNMENT - 1) & (DEFAULT_ALIGNMENT - 1);
+    return (T *) pt;
+  }
+
+  //
+  // block
+  //
+  block::block ()
+    : dim { 0 }
+    , ptr { NULL }
+  {
+  }
+
+  block::block (block &&b)
+    : dim {b.dim}
+    , ptr {b.ptr}
+  {
+    b.dim = 0;
+    b.ptr = NULL;
+  }
+
+  block::block (size_t dim, void *ptr)
+    : dim {dim}
+    , ptr { (char *) ptr}
+  {
+  }
+
+  block &
+  block::operator= (block &&b)   //move assign
+  {
+    if (this != &b)
+      {
+	dim = b.dim;
+	ptr = b.ptr;
+	b.dim = 0;
+	b.ptr = NULL;
+      }
+    return *this;
+  }
+
+  bool
+  block::is_valid () const
+  {
+    return (dim != 0 && ptr != NULL);
+  }
+
+  char *
+  block::move_ptr ()
+  {
+    char *p = ptr;
+
+    dim = 0;
+    ptr = NULL;
+
+    return p;
+  }
+
+  //
+  // block_ext
+  //
+  extensible_block::extensible_block ()
+    : extensible_block {default_realloc, default_dealloc}
+  {
+  }
+
+  extensible_block::extensible_block (extensible_block &&b)
+    : extensible_block {b.m_extend, b.m_dealloc}
+  {
+    b.dim = 0;
+    b.ptr = NULL;
+  }
+
+  extensible_block::extensible_block (std::function<void (block &b, size_t n)> extend,
+				      std::function<void (block &b)> dealloc)
+    : block {}
+    , m_extend { extend }
+    , m_dealloc { dealloc }
+  {
+  }
+
+  extensible_block &
+  extensible_block::operator= (extensible_block &&b)
+  {
+    if (this != &b)
+      {
+	m_dealloc (*this);
+	dim = b.dim;
+	ptr = b.ptr;
+	m_extend = b.m_extend;
+	m_dealloc = b.m_dealloc;
+	b.dim = 0;
+	b.ptr = NULL;
+      }
+
+    return *this;
+  }
+
+  extensible_block::~extensible_block ()
+  {
+    m_dealloc (*this);
+  }
+
+  void
+  extensible_block::extend_by (size_t additional_bytes)
+  {
+    m_extend (*this, additional_bytes);
+  }
+
+  //
+  // other functions
+  //
+  void
+  default_realloc (block &b, size_t len)
   {
     size_t dim = b.dim ? b.dim : 1;
 
@@ -114,81 +328,12 @@ namespace mem
     b = std::move (x);
   }
 
-  inline void default_dealloc (block &b)
+  void
+  default_dealloc (block &b)
   {
     delete [] b.ptr;
     b = {};
   }
-
-  /* Memory Block - Extendable
-   * - able to extend/reallocate to accomodate additional bytes
-   * - owns the memory by default and it will free the memory in destructor unless it is moved:
-   *    {
-   *        mem::block_ext block{some_realloc, some_dealloc};//some_realloc/dealloc = functions, functors or lambdas
-   *        //...
-   *        //move it or it will be deallocated; simple copy => compiler error because it is not designed to be copied
-   *        mem::block b = std::move(block);
-   *    }
-   */
-  struct block_ext: public block
-  {
-      block_ext ()                                         //default ctor
-      //: block_ext {default_realloc, default_dealloc} //doesn't work on gcc 4.4.7
-	: block {}
-	, m_extend {default_realloc}
-	, m_dealloc {default_dealloc}
-      {
-      }
-
-      block_ext (block_ext &&b)                           //move ctor
-	: block {std::move (b)}
-	, m_extend {b.m_extend}
-	, m_dealloc {b.m_dealloc}
-      {
-	b.dim = 0;
-	b.ptr = NULL;
-      }
-
-      block_ext &operator= (block_ext &&b)                //move assignment
-      {
-	if (this != &b)
-	  {
-	    m_dealloc (*this);
-	    dim = b.dim;
-	    ptr = b.ptr;
-	    m_extend = b.m_extend;
-	    m_dealloc = b.m_dealloc;
-	    b.dim = 0;
-	    b.ptr = NULL;
-	  }
-
-	return *this;
-      }
-
-      block_ext (std::function<void (block &b, size_t n)> extend, std::function<void (block &b)> dealloc) //general ctor
-	: block {}
-	, m_extend {extend}
-	, m_dealloc {dealloc}
-      {}
-
-      ~block_ext ()                                        //dtor
-      {
-	m_dealloc (*this);
-      }
-
-      void extend (size_t additional_bytes)
-      {
-	m_extend (*this, additional_bytes);
-      }
-
-    private:
-      std::function<void (block &b, size_t n)> m_extend;  //extend memory block to fit at least additional n bytes
-      std::function<void (block &b)> m_dealloc;           //deallocate memory block
-
-      block_ext (const block_ext &) = delete;             //copy ctor
-      block_ext &operator= (const block_ext &) = delete;  //copy assignment
-  };
-
 } // namespace mem
 
 #endif // _MEM_BLOCK_HPP_
