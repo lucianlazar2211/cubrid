@@ -53,6 +53,7 @@ namespace mem
    */
   struct block
   {
+    public:
       size_t dim;
       char *ptr;
 
@@ -107,6 +108,7 @@ namespace mem
    */
   struct extensible_block : public block
   {
+    public:
       inline extensible_block ();                                          //default ctor
       inline extensible_block (extensible_block &&b);                             //move ctor
       inline extensible_block (std::function<void (block &b, size_t n)> extend,
@@ -154,6 +156,12 @@ namespace mem
   class extensible_stack_block
   {
     public:
+      extensible_stack_block ()
+	: m_stack ()
+	, m_ext_block ()
+	, m_ptr (m_stack.get_ptr ())
+      {
+      }
 
       void extend_by (size_t additional_bytes)
       {
@@ -161,6 +169,11 @@ namespace mem
 	  {
 	    m_ext_block.extend_to (m_stack.SIZE + additional_bytes);
 	  }
+	else
+	  {
+	    m_ext_block.extend_by (additional_bytes);
+	  }
+	m_ptr = m_ext_block.get_ptr ();
       }
 
       void extend_to (size_t total_bytes)
@@ -170,13 +183,23 @@ namespace mem
 	    return;
 	  }
 	m_ext_block.extend_to (total_bytes);
+	m_ptr = m_ext_block.get_ptr ();
+      }
+
+      char *get_ptr () const
+      {
+	return m_ptr;
+      }
+      std::size_t get_size () const
+      {
+	return m_ptr == m_stack.get_ptr () ? m_stack.SIZE : m_ext_block.get_size ();
       }
 
     private:
       stack_block<S> m_stack;
       extensible_block m_ext_block;
+      char *m_ptr;
   };
-  // todo extensible_block is a extensible_stack_block with S = 0
 
   //
   // other functions
