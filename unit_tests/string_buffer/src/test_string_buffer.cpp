@@ -46,13 +46,12 @@ struct suffix
   }
 };
 
-#define N 8192
+const size_t N = 8192;
 
 char stack_buf[sizeof (prefix) + N + sizeof (suffix)]; // working buffer
 allocator::stack stack_allocator (stack_buf, sizeof (stack_buf));
 allocator::affix<allocator::stack, prefix, suffix> affix_allocator (stack_allocator);
 
-#if 1 //bSolo: temporary until evolve above gcc 4.4.7
 void temp_extend (mem::block &block, size_t len)
 {
   mem::block b = affix_allocator.allocate (block.dim + len);
@@ -65,8 +64,8 @@ void temp_dealloc (mem::block &block)
 {
   affix_allocator.deallocate (std::move (block));
 }
-#endif
 
+mem::block_allocator AFFIX_BLOCK_ALLOCATOR { temp_extend, temp_dealloc };
 
 class test_string_buffer
 {
@@ -97,7 +96,7 @@ class test_string_buffer
       }
     }
 #else
-      , m_sb {&temp_extend, &temp_dealloc}
+      , m_sb {AFFIX_BLOCK_ALLOCATOR}
 #endif
     {
     }

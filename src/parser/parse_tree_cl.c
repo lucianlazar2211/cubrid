@@ -51,6 +51,7 @@
 #include "dbi.h"
 #include "string_buffer.hpp"
 #include "dbtype.h"
+#include "parser_allocator.hpp"
 
 #include <malloc.h>
 

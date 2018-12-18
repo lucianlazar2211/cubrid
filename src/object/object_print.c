@@ -60,6 +60,7 @@
 #endif /* !defined (SERVER_MODE) */
 #include "string_buffer.hpp"
 #include "dbtype.h"
+#include "memory_private_allocator.hpp"
 
 #if defined (SUPPRESS_STRLEN_WARNING)
 #define strlen(s1)  ((int) strlen(s1))

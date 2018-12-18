@@ -657,20 +657,6 @@ extern "C"
 
 #if defined __cplusplus
 extern void pt_move_node (REFPTR (PT_NODE, destp), REFPTR (PT_NODE, srcp));
-
-class parser_block_allocator:public
-  mem::block_allocator
-{
-public:
-  parser_block_allocator () = delete;
-  parser_block_allocator (parser_context * parser);
-
-private:
-  void alloc (mem::block & b, size_t size);
-  void dealloc (mem::block & b);
-
-  parser_context *m_parser;
-};
 #endif // c++
 
 #endif /* _PARSER_H_ */

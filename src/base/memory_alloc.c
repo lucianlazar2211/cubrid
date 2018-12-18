@@ -977,35 +977,3 @@ db_private_set_heapid_to_thread (THREAD_ENTRY * thread_p, HL_HEAPID heap_id)
 #endif // SERVER_MODE
 
 #endif
-
-namespace mem
-{
-  const block_allocator PRIVATE_BLOCK_ALLOCATOR = {
-    [](block & b, size_t size) {
-				if (b.ptr == NULL || b.dim == 0) {
-								  b.ptr = (char *) db_private_alloc (NULL, size);
-								  b.dim = size;}
-								  else
-								  if (size <= b.dim)
-								  {
-								  // no change
-								  }
-								  else
-								  {
-								  char *new_ptr =
-								  (char *)db_private_realloc (NULL, b.ptr, size);
-								  if (new_ptr != NULL)
-								  {
-								  b.ptr = new_ptr; b.dim = size;}
-								  else
-								  {
-								  assert (false);}
-								  }
-								  }
-								  ,[](block & b)
-								  {
-								  if (b.ptr != NULL)
-								  {
-								  db_private_free (NULL, b.ptr);}
-								  b.ptr = NULL; b.dim = 0;}
-								  ,};}	// namespace mem

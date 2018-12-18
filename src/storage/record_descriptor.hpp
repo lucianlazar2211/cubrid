@@ -21,6 +21,7 @@
 // record_descriptor - RECDES extended functionality
 //
 
+#include "mem_block.hpp"
 #include "memory_alloc.h"
 #include "storage_common.h"
 
@@ -62,7 +63,7 @@ class record_descriptor
 
     // based on an aligned buffer
     template <size_t S>
-    record_descriptor (aligned_stack_memory_buffer<S> &membuf);
+    record_descriptor (mem::stack_block<S> &membuf);
     record_descriptor (const char *data, size_t size);
 
     // based on recdes
@@ -112,7 +113,7 @@ class record_descriptor
 //////////////////////////////////////////////////////////////////////////
 
 template <size_t S>
-record_descriptor::record_descriptor (aligned_stack_memory_buffer<S> &membuf)
+record_descriptor::record_descriptor (mem::stack_block<S> &membuf)
 {
   m_recdes.area_size = membuf.SIZE;
   m_recdes.length = 0;

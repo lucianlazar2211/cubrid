@@ -48,6 +48,7 @@
 #include "transform.h"
 #include "partition_sr.h"
 #include "query_executor.h"
+#include "mem_block.hpp"
 #include "object_primitive.h"
 #include "perf_monitor.h"
 #include "fault_injection.h"
@@ -36619,7 +36620,7 @@ btree_leaf_record::add_overflow_vpid (record_descriptor & record_copy, const VPI
   // step 2
   // add vpid at the end of record
   // make room
-  aligned_stack_memory_buffer<DISK_VPID_ALIGNED_SIZE> membuf;
+  mem::stack_block<DISK_VPID_ALIGNED_SIZE> membuf;
   cubpacking::packer writer;
   writer.init_for_packing (membuf.get_ptr (), membuf.SIZE);
   btree_packer_pack_vpid (writer, vpid);
@@ -36655,7 +36656,7 @@ void
 btree_leaf_record::update_overflow_vpid (record_descriptor & record_copy, const VPID & vpid)
 {
   // only change VPID at the end
-  aligned_stack_memory_buffer<DISK_VPID_ALIGNED_SIZE> membuf;
+  mem::stack_block<DISK_VPID_ALIGNED_SIZE> membuf;
   cubpacking::packer writer;
   writer.init_for_packing (membuf.get_ptr (), membuf.SIZE);
   btree_packer_pack_vpid (writer, vpid);
@@ -37128,7 +37129,7 @@ btree_overflow_oids_record::update_record (const btree_record_modify_function & 
 int
 btree_overflow_oids_record::delete_object (const btree_object_location & location)
 {
-  std::size_t object_size;
+  std::size_t object_size = BTREE_OBJECT_FIXED_SIZE (location.m_node->m_btinfo);
 
   if (m_record.get_size () > object_size)
     {
