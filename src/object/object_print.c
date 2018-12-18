@@ -741,21 +741,7 @@ void
 help_fprint_value (THREAD_ENTRY * thread_p, FILE * fp, const DB_VALUE * value)
 {
 /* *INDENT-OFF* */
-  db_private_allocator<char> private_allocator{thread_p};
-  string_buffer sb{
-    [&private_allocator] (mem::block& block, size_t len)
-    {
-      mem::block b{block.dim + len, private_allocator.allocate (block.dim + len)};
-      memcpy (b.ptr, block.ptr, block.dim);
-      private_allocator.deallocate (block.ptr);
-      block = std::move (b);
-    },
-    [&private_allocator] (mem::block& block)
-    {
-      private_allocator.deallocate (block.ptr);
-      block = {};
-    }
-  };
+  string_buffer sb (mem::PRIVATE_BLOCK_ALLOCATOR);
 /* *INDENT-ON* */
 
   db_value_printer printer (sb);

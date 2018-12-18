@@ -70,6 +70,7 @@ set(BASE_SOURCES
   ${BASE_DIR}/porting.c
   ${BASE_DIR}/area_alloc.c
   ${BASE_DIR}/fixed_alloc.c
+  ${BASE_DIR}/mem_block.cpp
   ${BASE_DIR}/memory_alloc.c
   ${BASE_DIR}/databases_file.c
   ${BASE_DIR}/encryption.c

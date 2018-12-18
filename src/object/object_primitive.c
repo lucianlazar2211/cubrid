@@ -9957,18 +9957,7 @@ char *
 pr_valstring (THREAD_ENTRY * threade, DB_VALUE * val)
 {
 /* *INDENT-OFF* */
-  string_buffer sb {
-    [&threade] (mem::block &block, size_t len)
-    {
-      block.ptr = (char *) db_private_realloc (threade, block.ptr, block.dim + len);
-      block.dim += len;
-    },
-    [&threade] (mem::block &block)
-    {
-      db_private_free (threade, block.ptr);
-      block = {};
-    }
-  };
+  string_buffer sb (mem::PRIVATE_BLOCK_ALLOCATOR);
 /* *INDENT-ON* */
 
   if (val == NULL)

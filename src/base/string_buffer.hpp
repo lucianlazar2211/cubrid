@@ -57,9 +57,9 @@ class string_buffer
       m_len = 0; //dtor
     }
 
-    string_buffer (std::function<void (mem::block &b, size_t n)> extend, std::function<void (mem::block &b)> dealloc)
+    string_buffer (const mem::block_allocator &alloc)
       : m_len {0}
-      , m_ext_block {extend, dealloc}
+      , m_ext_block { alloc }
     {
     }
 

@@ -43,6 +43,8 @@
 #endif
 
 #if defined (__cplusplus)
+#include "mem_block.hpp"
+
 #include <memory>
 #include <functional>
 #endif
@@ -489,6 +491,11 @@ public:
 private:
   std::size_t m_offset;
 };
+
+namespace mem
+{
+  extern const block_allocator PRIVATE_BLOCK_ALLOCATOR;
+} // namespace mem
 
 // *INDENT-ON*
 

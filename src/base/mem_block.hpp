@@ -36,6 +36,7 @@
 #include <memory.h>
 #include <functional>
 
+#include <cassert>
 #include <cinttypes>
 
 namespace mem
@@ -96,6 +97,33 @@ namespace mem
       };
   };
 
+  struct block_allocator
+  {
+    public:
+      using alloc_func = std::function<void (block &b, size_t size)>;
+      using dealloc_func = std::function<void (block &b)>;
+
+      alloc_func m_alloc_f;   // allocator/reallocator
+      dealloc_func m_dealloc_f;              // deallocator
+
+      block_allocator () = delete;
+      block_allocator (const alloc_func &alloc_f, const dealloc_func &dealloc_f)
+	: m_alloc_f (alloc_f)
+	, m_dealloc_f (dealloc_f)
+      {
+      }
+
+      block_allocator &operator= (const block_allocator &other)
+      {
+	m_alloc_f = other.m_alloc_f;
+	m_dealloc_f = other.m_dealloc_f;
+	return *this;
+      }
+  };
+  extern const block_allocator STANDARD_BLOCK_ALLOCATOR;
+  extern const block_allocator EXPONENTIAL_STANDARD_BLOCK_ALLOCATOR;
+  // extern const block_allocator CSTYLE_BLOCK_ALLOCATOR;
+
   /* Memory Block - Extensible
    * - able to extend/reallocate to accommodate additional bytes
    * - owns the memory by default and it will free the memory in destructor unless it is moved:
@@ -106,47 +134,46 @@ namespace mem
    *        mem::block b = std::move(block);
    *    }
    */
-  struct extensible_block : public block
+  struct extensible_block
   {
     public:
       inline extensible_block ();                                          //default ctor
-      inline extensible_block (extensible_block &&b);                             //move ctor
-      inline extensible_block (std::function<void (block &b, size_t n)> extend,
-			       std::function<void (block &b)> dealloc);    //general ctor
+      inline extensible_block (extensible_block &&b);                              //move ctor
+      inline extensible_block (const block_allocator &alloc);     //general ctor
       inline ~extensible_block ();                                         //dtor
 
-      inline extensible_block &operator= (extensible_block &&b);                  //move assignment
+      inline extensible_block &operator= (extensible_block &&b);                   //move assignment
 
       inline void extend_by (size_t additional_bytes);
       inline void extend_to (size_t total_bytes)
       {
-	if (total_bytes <= dim)
+	if (total_bytes <= m_block.dim)
 	  {
 	    return;
 	  }
-	extend_by (total_bytes - dim);
+	extend_by (total_bytes - m_block.dim);
       }
 
       char *get_ptr () const
       {
-	return ptr;
+	return m_block.ptr;
       }
 
       std::size_t get_size () const
       {
-	return dim;
+	return m_block.dim;
       }
 
       char *release_ptr ()
       {
-	char *ret_ptr = ptr;
-	ptr = NULL;
+	char *ret_ptr = m_block.ptr;
+	m_block.ptr = NULL;
 	return ret_ptr;
       }
 
     private:
-      std::function<void (block &b, size_t n)> m_extend;  //extend memory block to fit at least additional n bytes
-      std::function<void (block &b)> m_dealloc;           //deallocate memory block
+      block m_block;
+      const block_allocator *m_allocator;
 
       extensible_block (const extensible_block &) = delete;             //copy ctor
       extensible_block &operator= (const extensible_block &) = delete;  //copy assignment
@@ -200,13 +227,6 @@ namespace mem
       extensible_block m_ext_block;
       char *m_ptr;
   };
-
-  //
-  // other functions
-  //
-  inline void default_realloc (block &b, size_t len);
-  inline void default_dealloc (block &b);
-
 } // namespace mem
 
 //////////////////////////////////////////////////////////////////////////
@@ -284,22 +304,20 @@ namespace mem
   // block_ext
   //
   extensible_block::extensible_block ()
-    : extensible_block {default_realloc, default_dealloc}
+    : extensible_block { STANDARD_BLOCK_ALLOCATOR }
   {
   }
 
   extensible_block::extensible_block (extensible_block &&b)
-    : extensible_block {b.m_extend, b.m_dealloc}
+    : extensible_block { *b.m_allocator }
   {
-    b.dim = 0;
-    b.ptr = NULL;
+    b.m_block.dim = 0;
+    b.m_block.ptr = NULL;
   }
 
-  extensible_block::extensible_block (std::function<void (block &b, size_t n)> extend,
-				      std::function<void (block &b)> dealloc)
-    : block {}
-    , m_extend { extend }
-    , m_dealloc { dealloc }
+  extensible_block::extensible_block (const block_allocator &alloc)
+    : m_block {}
+    , m_allocator (&alloc)
   {
   }
 
@@ -308,54 +326,25 @@ namespace mem
   {
     if (this != &b)
       {
-	m_dealloc (*this);
-	dim = b.dim;
-	ptr = b.ptr;
-	m_extend = b.m_extend;
-	m_dealloc = b.m_dealloc;
-	b.dim = 0;
-	b.ptr = NULL;
+	this->~extensible_block ();
+	m_allocator = b.m_allocator;
+	m_block.dim = b.m_block.dim;
+	m_block.ptr = b.m_block.ptr;
+	b.m_block.dim = 0;
+	b.m_block.ptr = NULL;
       }
-
     return *this;
   }
 
   extensible_block::~extensible_block ()
   {
-    m_dealloc (*this);
+    m_allocator->m_dealloc_f (m_block);
   }
 
   void
   extensible_block::extend_by (size_t additional_bytes)
   {
-    m_extend (*this, additional_bytes);
-  }
-
-  //
-  // other functions
-  //
-  void
-  default_realloc (block &b, size_t len)
-  {
-    size_t dim = b.dim ? b.dim : 1;
-
-    // calc next power of 2 >= b.dim
-    for (; dim < b.dim + len; dim *= 2)
-      ;
-
-    block x{dim, new char[dim]};
-    memcpy (x.ptr, b.ptr, b.dim);
-
-    delete [] b.ptr;
-
-    b = std::move (x);
-  }
-
-  void
-  default_dealloc (block &b)
-  {
-    delete [] b.ptr;
-    b = {};
+    m_allocator->m_alloc_f (m_block, m_block.dim + additional_bytes);
   }
 } // namespace mem
 
