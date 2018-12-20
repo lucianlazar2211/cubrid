@@ -80,24 +80,7 @@ class test_string_buffer
       : m_dim (8192)
       , m_len (0)
       , m_ref ((char *) calloc (m_dim, 1))
-#if 0 //bSolo: temporary until evolve above gcc 4.4.7
-      , m_sb
-    {
-      [] (mem::block& block, size_t len)
-      {
-	mem::block b = affix_allocator.allocate (block.dim + len);
-	memcpy (b.ptr, block.ptr, block.dim);
-	affix_allocator.deallocate (std::move (block));
-	block = std::move (b);
-      },
-      [] (mem::block& block)
-      {
-	affix_allocator.deallocate (std::move (block));
-      }
-    }
-#else
       , m_sb {AFFIX_BLOCK_ALLOCATOR}
-#endif
     {
     }
 

@@ -31,9 +31,6 @@
 #include <stdarg.h>
 
 #include "dbtype_def.h"
-#ifdef __cplusplus
-#include "mem_block.hpp"
-#endif // c++
 #include "parse_tree.h"
 #include "system.h"
 

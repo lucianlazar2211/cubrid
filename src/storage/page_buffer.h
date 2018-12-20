@@ -33,7 +33,6 @@
 #include "disk_manager.h"
 #include "lock_manager.h"
 #include "mem_block.hpp"
-#include "memory_alloc.h"
 #include "perf_monitor.h"
 #include "storage_common.h"
 
@@ -235,11 +234,8 @@ struct pgbuf_watcher
 };
 
 // *INDENT-OFF*
-// temporary - disable for non-C++; should be fixed by json table patch
-#if defined __cplusplus
 using pgbuf_aligned_buffer = mem::stack_block <(size_t) IO_MAX_PAGE_SIZE>;
 using pgbuf_resizable_buffer = mem::extensible_stack_block<(size_t) IO_MAX_PAGE_SIZE>;
-#endif // C++
 // *INDENT-ON*
 
 extern HFID *pgbuf_ordered_null_hfid;
