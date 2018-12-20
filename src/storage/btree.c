@@ -56,6 +56,8 @@
 #include "thread_manager.hpp"
 #include "record_descriptor.hpp"
 #include "packer.hpp"
+#include "extensible_array.hpp"
+#include "mem_block.hpp"
 
 #include <limits>
 
@@ -1125,7 +1127,7 @@ struct btree_helper
 //////////////////////////////////////////////////////////////////////////
 // *INDENT-OFF*
 
-using btree_object_packing_buffer = aligned_stack_memory_buffer<BTREE_OBJECT_MAX_SIZE>;
+using btree_object_packing_buffer = mem::stack_block<BTREE_OBJECT_MAX_SIZE>;
 
 // forward definition
 class btree_key_record;
@@ -1211,7 +1213,7 @@ class btree_page_logger
 {
 public:
   static const std::size_t INCREMENTAL_CHANGES_DEFAULT_SIZE = (std::size_t) BTREE_RV_BUFFER_SIZE;
-  using incremental_buffer_type = append_buffer<INCREMENTAL_CHANGES_DEFAULT_SIZE>;
+  using incremental_buffer_type = mem::appendible_block<INCREMENTAL_CHANGES_DEFAULT_SIZE>;
 
   btree_page_logger (void) = delete;
   btree_page_logger (btree_logging_context & logging_context, const btree_node_context & node_context, PGSLOTID slotid);
@@ -35687,7 +35689,7 @@ btree_rv_write_logical_undo (btid_int & btree_info, const db_value & key, btree_
   // be conservative and estimate alignments
   estimate_size += 2 * OR_INT_SIZE;
 
-  data_buffer.resize (estimate_size);
+  data_buffer.extend_to (estimate_size);
   logical_undo.init_for_packing (data_buffer.get_ptr (), estimate_size);
 
   assert (btree_info.sys_btid != NULL);
@@ -38084,7 +38086,7 @@ btree_page_logger::append_redo_data (size_t redo_size, const char *redo_data)
 const char *
 btree_page_logger::get_buffer_data (const incremental_buffer_type & buf) const
 {
-  return buf.get_size () == 0 ? NULL : buf.get_data ();
+  return buf.get_size () == 0 ? NULL : buf.get_read_ptr ();
 }
 
 //

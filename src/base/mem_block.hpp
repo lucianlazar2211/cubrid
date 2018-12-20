@@ -84,6 +84,10 @@ namespace mem
       {
 	return &m_buf[0];
       }
+      const char *get_read_ptr () const
+      {
+	return &m_buf[0];
+      }
 
     private:
       union
@@ -155,6 +159,11 @@ namespace mem
 	return m_block.ptr;
       }
 
+      const char *get_read_ptr () const
+      {
+	return m_block.ptr;
+      }
+
       std::size_t get_size () const
       {
 	return m_block.dim;
@@ -220,6 +229,12 @@ namespace mem
       {
 	return m_use_stack ? m_stack.get_ptr () : m_ext_block.get_ptr ();
       }
+
+      const char *get_read_ptr () const
+      {
+	return m_use_stack ? m_stack.get_read_ptr () : m_ext_block.get_ptr ();
+      }
+
       std::size_t get_size () const
       {
 	return m_use_stack ? m_stack.SIZE : m_ext_block.get_size ();
