@@ -82,11 +82,7 @@ namespace mem
       stack_block (void) = default;
       char *get_ptr (void)
       {
-	return m_buf;
-      }
-      const block get_block (void)
-      {
-	return block (m_buf, SIZE);
+	return &m_buf[0];
       }
 
     private:
@@ -122,7 +118,7 @@ namespace mem
   };
   extern const block_allocator STANDARD_BLOCK_ALLOCATOR;
   extern const block_allocator EXPONENTIAL_STANDARD_BLOCK_ALLOCATOR;
-  // extern const block_allocator CSTYLE_BLOCK_ALLOCATOR;
+  extern const block_allocator CSTYLE_BLOCK_ALLOCATOR;
 
   /* Memory Block - Extensible
    * - able to extend/reallocate to accommodate additional bytes
@@ -186,7 +182,14 @@ namespace mem
       extensible_stack_block ()
 	: m_stack ()
 	, m_ext_block ()
-	, m_ptr (m_stack.get_ptr ())
+	, m_use_stack (true)
+      {
+      }
+
+      extensible_stack_block (const block_allocator &alloc)
+	: m_stack ()
+	, m_ext_block (alloc)
+	, m_use_stack (true)
       {
       }
 
@@ -200,7 +203,7 @@ namespace mem
 	  {
 	    m_ext_block.extend_by (additional_bytes);
 	  }
-	m_ptr = m_ext_block.get_ptr ();
+	m_use_stack = false;
       }
 
       void extend_to (size_t total_bytes)
@@ -210,22 +213,22 @@ namespace mem
 	    return;
 	  }
 	m_ext_block.extend_to (total_bytes);
-	m_ptr = m_ext_block.get_ptr ();
+	m_use_stack = false;
       }
 
-      char *get_ptr () const
+      char *get_ptr ()
       {
-	return m_ptr;
+	return m_use_stack ? m_stack.get_ptr () : m_ext_block.get_ptr ();
       }
       std::size_t get_size () const
       {
-	return m_ptr == m_stack.get_ptr () ? m_stack.SIZE : m_ext_block.get_size ();
+	return m_use_stack ? m_stack.SIZE : m_ext_block.get_size ();
       }
 
     private:
       stack_block<S> m_stack;
       extensible_block m_ext_block;
-      char *m_ptr;
+      bool m_use_stack;
   };
 } // namespace mem
 

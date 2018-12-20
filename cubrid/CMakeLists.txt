@@ -124,7 +124,6 @@ set(BASE_SOURCES
   ${BASE_DIR}/xml_parser.c
   )
 set (BASE_HEADERS
-  ${BASE_DIR}/contiguous_memory_buffer.hpp
   ${BASE_DIR}/db_private_allocator.hpp
   ${BASE_DIR}/error_code.h
   ${BASE_DIR}/error_context.hpp
