@@ -157,7 +157,7 @@ class JSON_DOC: public rapidjson::GenericDocument <JSON_ENCODING, JSON_PRIVATE_M
 #endif // TODO_OPTIMIZE_JSON_BODY_STRING
 };
 
-typedef std::function<int (JSON_VALUE &, const std::string &, bool &)> map_func_type;
+typedef std::function<int (const JSON_VALUE &, const std::string &, bool &)> map_func_type;
 
 // class JSON_ITERATOR - virtual interface to wrap array and object iterators
 //
@@ -1336,7 +1336,6 @@ db_json_extract_document_from_path (const JSON_DOC *document, const std::vector<
       array_result = db_json_path_contains_wildcard (transformed_paths[0].c_str ());
     }
 
-  std::vector<JSON_VALUE *> produced;
   std::vector<std::regex> regs;
   error_code = db_json_paths_to_regex (transformed_paths, regs, true);
   if (error_code)
@@ -1344,13 +1343,15 @@ db_json_extract_document_from_path (const JSON_DOC *document, const std::vector<
       return error_code;
     }
 
-  const map_func_type &f = [&regs, &produced] (JSON_VALUE &jv, const std::string &crt_path, bool &stop) -> int
+  // we gather extracted values in an array to match with the order of the given path arguments
+  std::vector<std::vector<const JSON_VALUE *>> produced_array (transformed_paths.size ());
+  const map_func_type &f = [&regs, &produced_array] (const JSON_VALUE &jv, const std::string &crt_path, bool &stop) -> int
   {
-    for (const auto &reg : regs)
+    for (std::size_t i = 0; i < regs.size (); ++i)
       {
-	if (std::regex_match (crt_path, reg))
+	if (std::regex_match (crt_path, regs[i]))
 	  {
-	    produced.push_back (&jv);
+	    produced_array[i].push_back (&jv);
 	  }
       }
     return NO_ERROR;
@@ -1359,26 +1360,35 @@ db_json_extract_document_from_path (const JSON_DOC *document, const std::vector<
   JSON_PATH_MAPPER json_extract_walker (f);
   json_extract_walker.WalkDocument (const_cast<JSON_DOC &> (*document));
 
-  if (produced.size () > 1 || array_result)
+  if (array_result)
     {
-      for (auto p : produced)
+      for (const auto &produced : produced_array)
+	{
+	  for (const JSON_VALUE *p : produced)
+	    {
+	      if (result == NULL)
+		{
+		  result = db_json_allocate_doc ();
+		  result->SetArray ();
+		}
+
+	      db_json_add_element_to_array (result, p);
+	    }
+	}
+    }
+  else
+    {
+      assert (produced_array.size () == 1 && (produced_array.empty () || produced_array.size () == 1));
+
+      if (!produced_array[0].empty ())
 	{
 	  if (result == NULL)
 	    {
 	      result = db_json_allocate_doc ();
-	      result->SetArray ();
 	    }
 
-	  db_json_add_element_to_array (result, p);
+	  result->CopyFrom (*produced_array[0][0], result->GetAllocator ());
 	}
-    }
-  else if (!produced.empty ())
-    {
-      if (result == NULL)
-	{
-	  result = db_json_allocate_doc();
-	}
-      result->CopyFrom (*produced[0], result->GetAllocator ());
     }
 
   return NO_ERROR;
@@ -1427,7 +1437,7 @@ db_json_contains_path (const JSON_DOC *document, const std::vector<std::string> 
       found_set[i] = false;
     }
 
-  const map_func_type &f_find = [&regs, &found_set, find_all] (JSON_VALUE &v, const std::string &accumulated_path,
+  const map_func_type &f_find = [&regs, &found_set, find_all] (const JSON_VALUE &v, const std::string &accumulated_path,
 				bool &stop) -> int
   {
     for (std::size_t i = 0; i < regs.size (); ++i)
@@ -2124,9 +2134,8 @@ db_json_search_func (JSON_DOC &doc, const DB_VALUE *pattern, const DB_VALUE *esc
 		     const std::vector<std::regex> &regs, bool find_all)
 {
   std::unordered_set<std::string> paths_gathered;
-  auto f_search = [&regs, &paths, pattern, esc_char, find_all, &paths_gathered] (JSON_VALUE &jv,
-		  const std::string &crt_path,
-		  bool &stop) -> int
+  const map_func_type &f_search = [&regs, &paths, pattern, esc_char, find_all, &paths_gathered] (const JSON_VALUE &jv,
+				  const std::string &crt_path, bool &stop) -> int
   {
     if (!jv.IsString ())
       {
