@@ -44,7 +44,6 @@
 #include "tz_support.h"
 #include "file_io.h"
 #include "db_json.hpp"
-#include "db_private_allocator.hpp"
 #include <utility>
 
 #if !defined (SERVER_MODE)
@@ -9957,9 +9956,8 @@ pr_data_writeval (OR_BUF * buf, DB_VALUE * value)
 char *
 pr_valstring (THREAD_ENTRY * threade, DB_VALUE * val)
 {
-/* *INDENT-OFF* */
-  string_buffer sb (mem::PRIVATE_BLOCK_ALLOCATOR);
-/* *INDENT-ON* */
+  const size_t BUFFER_SIZE = 1024;
+  string_buffer sb (cubmem::PRIVATE_BLOCK_ALLOCATOR, BUFFER_SIZE);
 
   if (val == NULL)
     {

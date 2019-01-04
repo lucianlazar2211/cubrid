@@ -43,7 +43,6 @@ struct or_buf;
  */
 namespace cubpacking
 {
-
   class packer
   {
     public:
@@ -151,8 +150,19 @@ namespace cubpacking
       char *m_write_ptr;
   };
 
+  class unpacker
+  {
+    public:
+
+
+    private:
+      const char *m_data_ptr;
+  };
+
 } /* namespace cubpacking */
 
-using packing_packer = cubpacking::packer;    // for legacy C files, because indent is confused by namespaces
+// for legacy C files, because indent is confused by namespaces
+using packing_packer = cubpacking::packer;
+using packing_unpacker = cubpacking::unpacker;
 
 #endif /* _PACKER_HPP_ */

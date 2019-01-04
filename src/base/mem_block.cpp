@@ -26,7 +26,7 @@
 
 #include <cstring>
 
-namespace mem
+namespace cubmem
 {
   void
   standard_alloc (block &b, size_t size)
@@ -44,7 +44,9 @@ namespace mem
       {
 	char *new_ptr = new char[size];
 	std::memcpy (new_ptr, b.ptr, b.dim);
+
 	delete[] b.ptr;
+
 	b.ptr = new_ptr;
 	b.dim = size;
       }
@@ -75,10 +77,15 @@ namespace mem
     else
       {
 	size_t new_size;
-	for (new_size = b.dim; new_size < size; new_size *= 2);
+
+	for (new_size = b.dim; new_size < size; new_size *= 2)
+	  ;
+
 	char *new_ptr = new char[new_size];
 	std::memcpy (new_ptr, b.ptr, b.dim);
+
 	delete[] b.ptr;
+
 	b.ptr = new_ptr;
 	b.dim = size;
       }
@@ -118,5 +125,22 @@ namespace mem
     b.dim = 0;
   }
 
-  // const block_allocator CSTYLE_BLOCK_ALLOCATOR { cstyle_alloc, cstyle_dealloc };
-} // namespace mem
+  const block_allocator CSTYLE_BLOCK_ALLOCATOR { cstyle_alloc, cstyle_dealloc };
+
+  //
+  // block_allocator
+  //
+  block_allocator::block_allocator (const alloc_func &alloc_f, const dealloc_func &dealloc_f)
+    : m_alloc_f (alloc_f)
+    , m_dealloc_f (dealloc_f)
+  {
+  }
+
+  block_allocator &
+  block_allocator::operator= (const block_allocator &other)
+  {
+    m_alloc_f = other.m_alloc_f;
+    m_dealloc_f = other.m_dealloc_f;
+    return *this;
+  }
+} // namespace cubmem

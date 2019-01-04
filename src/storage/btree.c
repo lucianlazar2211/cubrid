@@ -1129,7 +1129,7 @@ struct btree_helper
 //////////////////////////////////////////////////////////////////////////
 // *INDENT-OFF*
 
-using btree_object_packing_buffer = mem::stack_block<BTREE_OBJECT_MAX_SIZE>;
+using btree_object_packing_buffer = cubmem::stack_block<BTREE_OBJECT_MAX_SIZE>;
 
 // forward definition
 class btree_key_record;
@@ -1215,7 +1215,7 @@ class btree_page_logger
 {
 public:
   static const std::size_t INCREMENTAL_CHANGES_DEFAULT_SIZE = (std::size_t) BTREE_RV_BUFFER_SIZE;
-  using incremental_buffer_type = mem::appendible_block<INCREMENTAL_CHANGES_DEFAULT_SIZE>;
+  using incremental_buffer_type = cubmem::appendible_block<INCREMENTAL_CHANGES_DEFAULT_SIZE>;
 
   btree_page_logger (void) = delete;
   btree_page_logger (btree_logging_context & logging_context, const btree_node_context & node_context, PGSLOTID slotid);
@@ -36618,7 +36618,7 @@ btree_leaf_record::add_overflow_vpid (record_descriptor & record_copy, const VPI
   // step 2
   // add vpid at the end of record
   // make room
-  mem::stack_block<DISK_VPID_ALIGNED_SIZE> membuf;
+  cubmem::stack_block<DISK_VPID_ALIGNED_SIZE> membuf;
   cubpacking::packer writer;
   writer.init_for_packing (membuf.get_ptr (), membuf.SIZE);
   btree_packer_pack_vpid (writer, vpid);
@@ -36654,7 +36654,7 @@ void
 btree_leaf_record::update_overflow_vpid (record_descriptor & record_copy, const VPID & vpid)
 {
   // only change VPID at the end
-  mem::stack_block<DISK_VPID_ALIGNED_SIZE> membuf;
+  cubmem::stack_block<DISK_VPID_ALIGNED_SIZE> membuf;
   cubpacking::packer writer;
   writer.init_for_packing (membuf.get_ptr (), membuf.SIZE);
   btree_packer_pack_vpid (writer, vpid);

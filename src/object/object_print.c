@@ -25,7 +25,6 @@
 
 #include "object_print.h"
 #include "config.h"
-#include "db_private_allocator.hpp"
 #include "db_value_printer.hpp"
 #include "mem_block.hpp"
 
@@ -741,10 +740,8 @@ help_print_info (const char *command, FILE * fpp)
 void
 help_fprint_value (THREAD_ENTRY * thread_p, FILE * fp, const DB_VALUE * value)
 {
-/* *INDENT-OFF* */
   const size_t BUFFER_SIZE = 1024;
-  string_buffer sb (mem::PRIVATE_BLOCK_ALLOCATOR, BUFFER_SIZE);
-/* *INDENT-ON* */
+  string_buffer sb (cubmem::PRIVATE_BLOCK_ALLOCATOR, BUFFER_SIZE);
 
   db_value_printer printer (sb);
   printer.describe_value (value);

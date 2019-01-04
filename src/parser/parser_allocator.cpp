@@ -28,16 +28,16 @@
 #include <cstring>
 
 parser_block_allocator::parser_block_allocator (parser_context *parser)
-  : mem::block_allocator (std::bind (&parser_block_allocator::alloc, this, std::placeholders::_1,
-				     std::placeholders::_2),
-			  std::bind (&parser_block_allocator::dealloc, this, std::placeholders::_1))
+  : cubmem::block_allocator (std::bind (&parser_block_allocator::alloc, this, std::placeholders::_1,
+					std::placeholders::_2),
+			     std::bind (&parser_block_allocator::dealloc, this, std::placeholders::_1))
   , m_parser (parser)
 {
   //
 }
 
 void
-parser_block_allocator::alloc (mem::block &b, size_t size)
+parser_block_allocator::alloc (cubmem::block &b, size_t size)
 {
   if (b.ptr == NULL || b.dim == 0)
     {
@@ -51,9 +51,13 @@ parser_block_allocator::alloc (mem::block &b, size_t size)
   else
     {
       size_t new_size;
-      for (new_size = b.dim; new_size < size; new_size *= 2);
+
+      for (new_size = b.dim; new_size < size; new_size *= 2)
+	;
+
       char *new_ptr = (char *) parser_alloc (m_parser, (const int) new_size);
       std::memcpy (new_ptr, b.ptr, b.dim);
+
       // no freeing
       b.ptr = new_ptr;
       b.dim = new_size;
@@ -61,7 +65,7 @@ parser_block_allocator::alloc (mem::block &b, size_t size)
 }
 
 void
-parser_block_allocator::dealloc (mem::block &b)
+parser_block_allocator::dealloc (cubmem::block &b)
 {
   // no deallocation
 }
