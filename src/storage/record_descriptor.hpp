@@ -61,7 +61,7 @@ class record_descriptor
     record_descriptor (void);
     ~record_descriptor (void);
 
-    // based on an aligned buffer
+    // based on an buffers
     template <size_t S>
     record_descriptor (cubmem::stack_block<S> &membuf);
     record_descriptor (const char *data, size_t size);
@@ -69,43 +69,67 @@ class record_descriptor
     // based on recdes
     record_descriptor (const recdes &rec);
 
+    // peek record from page; changes into record data will not be permitted
     int peek (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid);
+
+    // copy record from page
     int copy (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid);
+
+    // get record from page with peek or copy mode
     int get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slotid, record_get_mode mode);
 
-    const recdes &get_recdes (void) const;
+    // getters
+    const recdes &get_recdes (void) const;  // get recdes
 
-    const char *get_data (void) const;
-    std::size_t get_size (void) const;
-    char *get_data_for_modify (void);   // try to avoid
+    const char *get_data (void) const;      // get record data
+    std::size_t get_size (void) const;      // get record size
+    char *get_data_for_modify (void);
 
-    void set_data (const char *data, size_t size);
+    // setters
+    void set_data (const char *data, size_t size);      // set record data to byte array
     template <typename T>
-    void set_data_to_object (const T &t);
+    void set_data_to_object (const T &t);               // set record data to object
 
+    //
+    // manipulate record data
+    //
+
+    // replace old_size bytes at offset with new_size bytes from new_data
     void modify_data (std::size_t offset, std::size_t old_size, std::size_t new_size, const char *new_data);
+
+    // delete data_size bytes from offset
     void delete_data (std::size_t offset, std::size_t data_size);
+
+    // insert new_size bytes from new_data at offset
     void insert_data (std::size_t offset, std::size_t new_size, const char *new_data);
+
+    // move record data starting from source_offset to dest_offset
     void move_data (std::size_t dest_offset, std::size_t source_offset);
 
   private:
 
+    // resize record buffer; copy_data is true if existing data must be preserved
     void resize (cubthread::entry *thread_p, std::size_t size, bool copy_data);
+
+    // debug function to check if data changes are permitted; e.g. changes into peeked records are not permitted
     void check_changes_are_permitted (void) const;
 
-    enum class status
-    {
-      INVALID,
-      PEEKED,
-      COPIED,
-      NEW,
-      IMMUTABLE
-    };
-    void inline update_status_after_get (record_get_mode mode);
+    void update_source_after_get (record_get_mode mode);
 
-    recdes m_recdes;
-    char *m_own_data;
-    status m_status;
+    // source of record data
+    enum class data_source
+    {
+      INVALID,          // invalid data
+      PEEKED,           // record data peeked from page
+      COPIED,           // record data copied from page or another record
+      NEW,              // record data is new
+      IMMUTABLE         // record data is a constant buffer or object
+    };
+
+    recdes m_recdes;                  // underlaying recdes
+    char *m_own_data;                 // non-nil value if record descriptor is owner of data buffer; is freed on
+    // destruction
+    data_source m_data_source;        // source of record data
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -120,7 +144,7 @@ record_descriptor::record_descriptor (cubmem::stack_block<S> &membuf)
   m_recdes.type = REC_HOME;
   m_recdes.data = membuf.get_ptr ();
   m_own_data = NULL;
-  m_status = status::NEW;
+  m_data_source = data_source::NEW;
 }
 
 template <typename T>

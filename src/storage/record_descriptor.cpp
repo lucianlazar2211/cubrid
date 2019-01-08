@@ -49,7 +49,7 @@ record_descriptor::record_descriptor (void)
   m_recdes.type = REC_HOME;
   m_recdes.data = NULL;
   m_own_data = NULL;
-  m_status = status::INVALID;
+  m_data_source = data_source::INVALID;
 }
 
 record_descriptor::record_descriptor (const recdes &rec)
@@ -62,9 +62,10 @@ record_descriptor::record_descriptor (const recdes &rec)
       m_recdes.area_size = rec.length;
       m_recdes.length = m_recdes.area_size;
       m_own_data = m_recdes.data = (char *) db_private_alloc (NULL, m_recdes.area_size);
+      assert (m_own_data != NULL);
       std::memcpy (m_recdes.data, rec.data, m_recdes.length);
 
-      m_status = status::COPIED;  // we assume this is a copied record
+      m_data_source = data_source::COPIED;  // we assume this is a copied record
     }
 }
 
@@ -101,7 +102,7 @@ record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slot
   SCAN_CODE sc = spage_get_record (thread_p, page, slotid, &m_recdes, mode_to_int);
   if (sc == S_SUCCESS)
     {
-      update_status_after_get (mode);
+      update_source_after_get (mode);
       return NO_ERROR;
     }
 
@@ -117,7 +118,7 @@ record_descriptor::get (cubthread::entry *thread_p, PAGE_PTR page, PGSLOTID slot
       sc = spage_get_record (thread_p, page, slotid, &m_recdes, mode_to_int);
       if (sc == S_SUCCESS)
 	{
-	  update_status_after_get (mode);
+	  update_source_after_get (mode);
 	  return NO_ERROR;
 	}
     }
@@ -139,7 +140,7 @@ record_descriptor::resize (cubthread::entry *thread_p, std::size_t required_size
   if (m_own_data == NULL)
     {
       m_own_data = (char *) db_private_alloc (thread_p, static_cast<int> (required_size));
-
+      assert (m_own_data != NULL);
       if (copy_data)
 	{
 	  assert (m_recdes.data != NULL);
@@ -149,32 +150,31 @@ record_descriptor::resize (cubthread::entry *thread_p, std::size_t required_size
   else
     {
       m_own_data = (char *) db_private_realloc (thread_p, m_own_data, static_cast<int> (required_size));
-
+      assert (m_own_data != NULL);
       if (copy_data)
 	{
 	  // realloc copied data
 	}
     }
 
-
   m_recdes.data = m_own_data;
   m_recdes.area_size = (int) required_size;
 }
 
 void
-record_descriptor::update_status_after_get (record_get_mode mode)
+record_descriptor::update_source_after_get (record_get_mode mode)
 {
   switch (mode)
     {
     case record_get_mode::PEEK_RECORD:
-      m_status = status::PEEKED;
+      m_data_source = data_source::PEEKED;
       break;
     case record_get_mode::COPY_RECORD:
-      m_status = status::COPIED;
+      m_data_source = data_source::COPIED;
       break;
     default:
       assert (false);
-      m_status = status::INVALID;
+      m_data_source = data_source::INVALID;
       break;
     }
 }
@@ -182,21 +182,21 @@ record_descriptor::update_status_after_get (record_get_mode mode)
 const recdes &
 record_descriptor::get_recdes (void) const
 {
-  assert (m_status != status::INVALID);
+  assert (m_data_source != data_source::INVALID);
   return m_recdes;
 }
 
 const char *
 record_descriptor::get_data (void) const
 {
-  assert (m_status != status::INVALID);
+  assert (m_data_source != data_source::INVALID);
   return m_recdes.data;
 }
 
 std::size_t
 record_descriptor::get_size (void) const
 {
-  assert (m_status != status::INVALID);
+  assert (m_data_source != data_source::INVALID);
   assert (m_recdes.length > 0);
   return static_cast<std::size_t> (m_recdes.length);
 }
@@ -213,7 +213,7 @@ void
 record_descriptor::set_data (const char *data, size_t size)
 {
   // data is assigned and cannot be changed
-  m_status = status::IMMUTABLE;
+  m_data_source = data_source::IMMUTABLE;
   m_recdes.data = const_cast<char *> (data);    // status will protect against changes
   m_recdes.length = (int) size;
 }
@@ -276,12 +276,11 @@ record_descriptor::delete_data (std::size_t offset, std::size_t data_size)
 void
 record_descriptor::insert_data (std::size_t offset, std::size_t new_size, const char *new_data)
 {
-  check_changes_are_permitted ();
   modify_data (offset, 0, new_size, new_data);
 }
 
 void
 record_descriptor::check_changes_are_permitted (void) const
 {
-  assert (m_status == status::COPIED || m_status == status::NEW);
+  assert (m_data_source == data_source::COPIED || m_data_source == data_source::NEW);
 }
