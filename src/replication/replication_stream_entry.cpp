@@ -83,7 +83,7 @@ namespace cubreplication
 
   int stream_entry::unpack_stream_entry_header ()
   {
-    cubpacking::packer *serializator = get_packer ();
+    cubpacking::unpacker *serializator = get_unpacker ();
     unsigned int count_and_flags;
     unsigned int state_flags;
 

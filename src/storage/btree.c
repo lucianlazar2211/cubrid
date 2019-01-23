@@ -2077,8 +2077,8 @@ static void btree_mvcc_info_set_delid (BTREE_MVCC_INFO * mvcc_info, MVCCID delid
 static void btree_or_get_oid (const char *ptr, OID * oid);
 static void btree_init_or_buf_as_record (OR_BUF & buf, RECDES * btree_rec);
 // record to packer functions may be useful for a larger scope than b-tree
-static void btree_record_get_read_packer (const record_descriptor & record, packing_packer & read_packer);
-static void btree_record_get_write_packer (record_descriptor & record, packing_packer & write_packer);
+static void btree_record_get_unpacker (const record_descriptor & record, packing_unpacker & read_packer);
+static void btree_record_get_packer (record_descriptor & record, packing_packer & write_packer);
 static int btree_get_mvcc_info_size_from_flags (btree_mvcc_flags_type mvcc_flags);
 static size_t btree_mvcc_info_get_disk_size (const BTREE_MVCC_INFO & mvcc_info);
 static size_t btree_object_info_get_disk_size (const btree_object_location & location,
@@ -2086,19 +2086,19 @@ static size_t btree_object_info_get_disk_size (const btree_object_location & loc
 static size_t btree_object_info_no_class_get_disk_size (const BTREE_OBJECT_INFO & obj_info);
 
 static void btree_packer_pack_mvccid (packing_packer & packer, MVCCID mvccid);
-static void btree_packer_unpack_mvccid (packing_packer & packer, MVCCID & mvccid);
+static void btree_packer_unpack_mvccid (packing_unpacker & packer, MVCCID & mvccid);
 static void btree_packer_pack_oid (packing_packer & packer, const OID & oid);
-static void btree_packer_unpack_oid (packing_packer & packer, OID & oid);
+static void btree_packer_unpack_oid (packing_unpacker & packer, OID & oid);
 static void btree_packer_pack_btid (packing_packer & packer, const BTID & btid);
-static void btree_packer_unpack_btid (packing_packer & packer, BTID & btid);
+static void btree_packer_unpack_btid (packing_unpacker & packer, BTID & btid);
 static void btree_packer_pack_vpid (packing_packer & packer, const VPID & vpid);
-static void btree_packer_unpack_vpid (packing_packer & packer, VPID & vpid);
+static void btree_packer_unpack_vpid (packing_unpacker & packer, VPID & vpid);
 static void btree_packer_pack_object (packing_packer & packer, const btree_object_location & location,
 				      btree_object_info & object);
-static void btree_packer_unpack_object (packing_packer & packer, const btree_object_location & location,
+static void btree_packer_unpack_object (packing_unpacker & packer, const btree_object_location & location,
 					btree_object_info & object);
 static void btree_packer_pack_object_no_class (packing_packer & packer, const btree_object_info & object);
-static void btree_packer_unpack_object_no_class (packing_packer & packer, btree_object_info & object);
+static void btree_packer_unpack_object_no_class (packing_unpacker & packer, btree_object_info & object);
 
 static inline void btree_online_index_check_state (MVCCID state);
 static inline bool btree_online_index_is_insert_flag_state (MVCCID state);
@@ -35759,7 +35759,7 @@ btree_rv_write_logical_undo (btid_int & btree_info, const db_value & key, btree_
   estimate_size += 2 * OR_INT_SIZE;
 
   data_buffer.extend_to (estimate_size);
-  logical_undo.init_for_packing (data_buffer.get_ptr (), estimate_size);
+  logical_undo.set_buffer (data_buffer.get_ptr (), estimate_size);
 
   assert (btree_info.sys_btid != NULL);
   btree_packer_pack_btid (logical_undo, *btree_info.sys_btid);
@@ -35779,7 +35779,7 @@ btree_rv_write_logical_undo (btid_int & btree_info, const db_value & key, btree_
 
 void
 btree_rv_read_logical_undo (const char *rv_data, size_t rv_size, BTID_INT & btree_info, BTREE_OBJECT_INFO & object,
-			    packing_packer & key_packer)
+			    packing_unpacker & key_packer)
 {
   // what is packed:
   //  1. btid_int
@@ -35789,9 +35789,9 @@ btree_rv_read_logical_undo (const char *rv_data, size_t rv_size, BTID_INT & btre
   // note - at this point, we don't know key type, so we don't know how to unpack it. we'll save the packed key to
   // key_packer and it will be unpacked after reading index info from root page
 
-  packing_packer rv_packer;
-
-  rv_packer.init_for_unpacking (rv_data, rv_size);
+  packing_unpacker rv_packer
+  {
+  rv_data, rv_size};
 
   assert (btree_info.sys_btid != NULL);
   btree_packer_unpack_btid (rv_packer, *btree_info.sys_btid);
@@ -35799,7 +35799,7 @@ btree_rv_read_logical_undo (const char *rv_data, size_t rv_size, BTID_INT & btre
   btree_packer_unpack_object_no_class (rv_packer, object);
 
   // remaining data is packed key
-  key_packer.init_for_unpacking (rv_data + rv_packer.get_current_size (), rv_size - rv_packer.get_current_size ());
+  key_packer.set_buffer (rv_data + rv_packer.get_current_size (), rv_size - rv_packer.get_current_size ());
 }
 
 static void
@@ -36019,8 +36019,9 @@ btree_rv_dump_redo_init_overflow_page (FILE * fp, int length, void *data)
   const char *rec_data = (char *) data + off;
   size_t rec_size = (size_t) length - off;
 
-  packing_packer packer;
-  packer.init_for_unpacking (rec_data, rec_size);
+  packing_unpacker packer
+  {
+  rec_data, rec_size};
 
   BTREE_OBJECT_INFO object;
 
@@ -36213,7 +36214,7 @@ btree_packer_pack_mvccid (packing_packer & packer, MVCCID mvccid)
 }
 
 static void
-btree_packer_unpack_mvccid (packing_packer & packer, MVCCID & mvccid)
+btree_packer_unpack_mvccid (packing_unpacker & packer, MVCCID & mvccid)
 {
   packer.unpack_bigint (&mvccid);
 }
@@ -36227,7 +36228,7 @@ btree_packer_pack_oid (packing_packer & packer, const OID & oid)
 }
 
 static void
-btree_packer_unpack_oid (packing_packer & packer, OID & oid)
+btree_packer_unpack_oid (packing_unpacker & packer, OID & oid)
 {
   packer.unpack_int (&oid.pageid);
   packer.unpack_short (&oid.slotid);
@@ -36244,7 +36245,7 @@ btree_packer_pack_btid (packing_packer & packer, const BTID & btid)
 }
 
 static void
-btree_packer_unpack_btid (packing_packer & packer, BTID & btid)
+btree_packer_unpack_btid (packing_unpacker & packer, BTID & btid)
 {
   packer.unpack_int (&btid.root_pageid);
   packer.unpack_int (&btid.vfid.fileid);
@@ -36261,7 +36262,7 @@ btree_packer_pack_vpid (packing_packer & packer, const VPID & vpid)
 }
 
 static void
-btree_packer_unpack_vpid (packing_packer & packer, VPID & vpid)
+btree_packer_unpack_vpid (packing_unpacker & packer, VPID & vpid)
 {
   packer.unpack_int (&vpid.pageid);
   packer.unpack_short (&vpid.volid);
@@ -36301,7 +36302,7 @@ btree_packer_pack_object (packing_packer & packer, const btree_object_location &
 }
 
 static void
-btree_packer_unpack_object (packing_packer & packer, const btree_object_location & location,
+btree_packer_unpack_object (packing_unpacker & packer, const btree_object_location & location,
                             btree_object_info & object)
 {
   object.mvcc_info.flags = btree_record_object_get_mvcc_flags (packer.get_curr_ptr ());
@@ -36361,7 +36362,7 @@ btree_packer_pack_object_no_class (packing_packer & packer, const btree_object_i
 }
 
 static void
-btree_packer_unpack_object_no_class (packing_packer & packer, btree_object_info & object)
+btree_packer_unpack_object_no_class (packing_unpacker & packer, btree_object_info & object)
 {
   object.mvcc_info.flags = btree_record_object_get_mvcc_flags (packer.get_curr_ptr ());
 
@@ -36383,23 +36384,21 @@ btree_packer_unpack_object_no_class (packing_packer & packer, btree_object_info 
 }
 
 static void
-btree_record_get_read_packer (const record_descriptor & record, packing_packer & read_packer)
+btree_record_get_unpacker (const record_descriptor & record, packing_unpacker & read_packer)
 {
-  read_packer.init_for_unpacking (record.get_data (), record.get_size ());
+  read_packer.set_buffer (record.get_data (), record.get_size ());
 }
 
 static void
-btree_record_get_write_packer (record_descriptor & record, packing_packer & write_packer)
+btree_record_get_packer (record_descriptor & record, packing_packer & write_packer)
 {
-  write_packer.init_for_packing (record.get_data_for_modify (), record.get_size ());
+  write_packer.set_buffer (record.get_data_for_modify (), record.get_size ());
 }
 
 static void
 btree_record_insert_object (record_descriptor & record, const btree_object_location & location,
                             btree_object_info & object, btree_page_logger & logger)
 {
-  packing_packer packer;
-
   btree_object_adjust_flags_for_location (location, object);
 
   size_t packed_size = btree_object_info_get_disk_size (location, object);
@@ -36409,7 +36408,7 @@ btree_record_insert_object (record_descriptor & record, const btree_object_locat
   // make room
   record.move_data (location.m_offset_in_record + packed_size, location.m_offset_in_record);
 
-  packer.init_for_packing (pack_ptr, packed_size);
+  packing_packer packer { pack_ptr, packed_size };
   btree_packer_pack_object (packer, location, object);
 
   logger.incremental_undoredo (location.m_offset_in_record, 0, packed_size, NULL, pack_ptr);
@@ -36440,12 +36439,11 @@ btree_record_replace_object (record_descriptor & record, const btree_object_loca
                              btree_object_info object, btree_page_logger & logger)
 {
   btree_object_packing_buffer membuf;
-  packing_packer packer;
 
   btree_object_adjust_flags_for_location (location, object);
 
   size_t new_packed_size = btree_object_info_get_disk_size (location, object);
-  packer.init_for_packing (membuf.get_ptr (), new_packed_size);
+  packing_packer packer { membuf.get_ptr (), new_packed_size };
   btree_packer_pack_object (packer, location, object);
 
   char *ptr = record.get_data_for_modify () + location.m_offset_in_record;
@@ -36600,8 +36598,8 @@ void
 btree_leaf_record::get_first_object (btree_object_info & first_object)
 {
   btree_object_location location (m_node_context, 0);
-  cubpacking::packer reader;
-  btree_record_get_read_packer (m_record, reader);
+  cubpacking::unpacker reader;
+  btree_record_get_unpacker (m_record, reader);
   btree_packer_unpack_object (reader, location, first_object);
 }
 
@@ -36613,8 +36611,8 @@ btree_leaf_record::update_first_object (std::function<void (btree_object_info &)
   btree_object_location location (m_node_context, 0);
 
   // read first object
-  cubpacking::packer reader;
-  btree_record_get_read_packer (record, reader);
+  cubpacking::unpacker reader;
+  btree_record_get_unpacker (record, reader);
   btree_packer_unpack_object (reader, location, first_object);
   size_t old_size = reader.get_current_size ();
 
@@ -36692,8 +36690,7 @@ btree_leaf_record::add_overflow_vpid (record_descriptor & record_copy, const VPI
   // add vpid at the end of record
   // make room
   cubmem::stack_block<DISK_VPID_ALIGNED_SIZE> membuf;
-  cubpacking::packer writer;
-  writer.init_for_packing (membuf.get_ptr (), membuf.SIZE);
+  cubpacking::packer writer { membuf.get_ptr (), membuf.SIZE };
   btree_packer_pack_vpid (writer, vpid);
   assert (writer.is_ended ());
   btree_record_insert_data (record_copy, record_copy.get_size (), membuf.SIZE, membuf.get_ptr (), m_logger);
@@ -36728,8 +36725,7 @@ btree_leaf_record::update_overflow_vpid (record_descriptor & record_copy, const 
 {
   // only change VPID at the end
   cubmem::stack_block<DISK_VPID_ALIGNED_SIZE> membuf;
-  cubpacking::packer writer;
-  writer.init_for_packing (membuf.get_ptr (), membuf.SIZE);
+  cubpacking::packer writer { membuf.get_ptr (), membuf.SIZE };
   btree_packer_pack_vpid (writer, vpid);
   assert (writer.is_ended ());
 
@@ -36797,8 +36793,7 @@ btree_leaf_record::get_last_object (btree_object_info & object, btree_object_loc
   // save location
   location.set_location (m_node_context, last_object_offset);
   // unpack object
-  cubpacking::packer reader;
-  reader.init_for_unpacking (m_record.get_data () + last_object_offset, end_offset - last_object_offset);
+  cubpacking::unpacker reader { m_record.get_data () + last_object_offset, end_offset - last_object_offset };
   btree_packer_unpack_object (reader, location, object);
   assert (reader.is_ended ());
 }
@@ -37136,9 +37131,8 @@ btree_overflow_oids_record::append_object_to_new_page (btree_object_info & objec
     }
 
   // pack object to a buffer
-  cubpacking::packer packer;
   btree_object_packing_buffer buffer;
-  packer.init_for_packing (buffer.get_ptr (), buffer.SIZE);
+  cubpacking::packer packer { buffer.get_ptr (), buffer.SIZE };
   btree_object_location location (m_node_context, 0);
   btree_packer_pack_object (packer, location, object);
 
@@ -37350,9 +37344,8 @@ btree_key_record::find_object (PGBUF_LATCH_MODE latch_mode, const OID & oid, con
 
           // unpack object
           btree_object_info obj;
-          cubpacking::packer reader;
-          reader.init_for_unpacking (record.get_data () + location.m_offset_in_record,
-                                     record.get_size () - location.m_offset_in_record);
+          cubpacking::unpacker reader { record.get_data () + location.m_offset_in_record,
+                                        record.get_size () - location.m_offset_in_record };
           btree_packer_unpack_object (reader, location, obj);
 
           assert (OID_EQ (&oid, &obj.oid));
@@ -37450,8 +37443,7 @@ btree_key_record::delete_object_from_key (const btree_object_location & location
               std::size_t object_size = BTREE_OBJECT_FIXED_SIZE (node_context.m_btinfo);
               std::size_t last_object_offset = record.get_size () - object_size;
               last_location.set_location (node_context, last_object_offset);
-              cubpacking::packer reader;
-              reader.init_for_unpacking (record.get_data () + last_object_offset, object_size);
+              cubpacking::unpacker reader { record.get_data () + last_object_offset, object_size };
               btree_packer_unpack_object (reader, location, last_object);
               assert (reader.is_ended ());
 
@@ -37714,14 +37706,13 @@ btree_key_record::create_key_record (btree_object_info & object)
   //
 
   pgbuf_aligned_buffer data_buffer;
-  packing_packer data_packer;
 
   btree_key_type key_type;
   VPID overflow_first_vpid = VPID_INITIALIZER;
 
   int error_code = NO_ERROR;
 
-  data_packer.init_for_packing (data_buffer.get_ptr (), data_buffer.SIZE);
+  packing_packer data_packer { data_buffer.get_ptr (), data_buffer.SIZE };
 
   btree_object_info object_copy = object;
   btree_object_location location (m_leaf_record.m_node_context, 0);   // start of leaf record

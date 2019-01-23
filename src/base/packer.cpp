@@ -59,30 +59,36 @@ namespace cubpacking
   //
 
   packer::packer (void)
-    : m_type (type::INVALID)
   {
     // all pointers are initialized to NULL
   }
 
-  void
-  packer::init_for_packing (char *storage, const size_t amount)
+  packer::packer (char *storage, const size_t amount)
   {
-    m_type = type::PACK;
-    m_packer_start_ptr = storage;
-    m_end_ptr = storage + amount;
-    m_write_ptr = storage;
-    m_read_ptr = NULL;
+    set_buffer (storage, amount);
   }
 
   void
-  packer::init_for_unpacking (const char *storage, const size_t amount)
+  packer::set_buffer (char *storage, const size_t amount)
   {
-    m_type = type::PACK;
-    m_packer_start_ptr = storage;
-    m_end_ptr = storage + amount;
-    m_read_ptr = storage;
-    m_write_ptr = NULL;
+    m_start_ptr = storage;
+    m_ptr = storage;
+    m_end_ptr = m_start_ptr + amount;
   }
+
+  unpacker::unpacker (const char *storage, const size_t amount)
+  {
+    set_buffer (storage, amount);
+  }
+
+  void
+  unpacker::set_buffer (const char *storage, const size_t amount)
+  {
+    m_start_ptr = storage;
+    m_ptr = storage;
+    m_end_ptr = m_start_ptr + amount;
+  }
+
 
   size_t
   packer::get_packed_int_size (size_t curr_offset)
@@ -90,40 +96,33 @@ namespace cubpacking
     return DB_ALIGN (curr_offset, INT_ALIGNMENT) - curr_offset + OR_INT_SIZE;
   }
 
-  int
+  void
   packer::pack_int (const int value)
   {
-    assert (m_type == type::PACK);
     align (INT_ALIGNMENT);
-    check_range (m_write_ptr, m_end_ptr, OR_INT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_INT_SIZE);
 
-    OR_PUT_INT (m_write_ptr, value);
-    m_write_ptr += OR_INT_SIZE;
-
-    return NO_ERROR;
+    OR_PUT_INT (m_ptr, value);
+    m_ptr += OR_INT_SIZE;
   }
 
-  int
-  packer::unpack_int (int *value)
+  void
+  unpacker::unpack_int (int *value)
   {
     align (INT_ALIGNMENT);
-    check_range (m_read_ptr, m_end_ptr, OR_INT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_INT_SIZE);
 
-    *value = OR_GET_INT (m_read_ptr);
-    m_read_ptr += OR_INT_SIZE;
-
-    return NO_ERROR;
+    *value = OR_GET_INT (m_ptr);
+    m_ptr += OR_INT_SIZE;
   }
 
-  int
-  packer::peek_unpack_int (int *value)
+  void
+  unpacker::peek_unpack_int (int *value)
   {
     align (INT_ALIGNMENT);
-    check_range (m_read_ptr, m_end_ptr, OR_INT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_INT_SIZE);
 
-    *value = OR_GET_INT (m_read_ptr);
-
-    return NO_ERROR;
+    *value = OR_GET_INT (m_ptr);
   }
 
   size_t
@@ -132,29 +131,24 @@ namespace cubpacking
     return DB_ALIGN (curr_offset, SHORT_ALIGNMENT) - curr_offset + OR_SHORT_SIZE;
   }
 
-  int
+  void
   packer::pack_short (const short *value)
   {
-    assert (m_type == type::PACK);
     align (SHORT_ALIGNMENT);
-    check_range (m_write_ptr, m_end_ptr, OR_SHORT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_SHORT_SIZE);
 
-    OR_PUT_SHORT (m_write_ptr, *value);
-    m_write_ptr += OR_SHORT_SIZE;
-
-    return NO_ERROR;
+    OR_PUT_SHORT (m_ptr, *value);
+    m_ptr += OR_SHORT_SIZE;
   }
 
-  int
-  packer::unpack_short (short *value)
+  void
+  unpacker::unpack_short (short *value)
   {
     align (SHORT_ALIGNMENT);
-    check_range (m_read_ptr, m_end_ptr, OR_SHORT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_SHORT_SIZE);
 
-    *value = OR_GET_SHORT (m_read_ptr);
-    m_read_ptr += OR_SHORT_SIZE;
-
-    return NO_ERROR;
+    *value = OR_GET_SHORT (m_ptr);
+    m_ptr += OR_SHORT_SIZE;
   }
 
   size_t
@@ -163,101 +157,82 @@ namespace cubpacking
     return DB_ALIGN (curr_offset, MAX_ALIGNMENT) - curr_offset + OR_BIGINT_SIZE;
   }
 
-  int
+  void
   packer::pack_bigint (const std::int64_t *value)
   {
-    assert (m_type == type::PACK);
     align (MAX_ALIGNMENT);
-    check_range (m_write_ptr, m_end_ptr, OR_BIGINT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_BIGINT_SIZE);
 
-    OR_PUT_INT64 (m_write_ptr, value);
-    m_write_ptr += OR_BIGINT_SIZE;
-
-    return NO_ERROR;
+    OR_PUT_INT64 (m_ptr, value);
+    m_ptr += OR_BIGINT_SIZE;
   }
 
-  int
-  packer::unpack_bigint (std::int64_t *value)
+  void
+  unpacker::unpack_bigint (std::int64_t *value)
   {
     align (MAX_ALIGNMENT);
-    check_range (m_read_ptr, m_end_ptr, OR_BIGINT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_BIGINT_SIZE);
 
-    OR_GET_INT64 (m_read_ptr, value);
-    m_read_ptr += OR_BIGINT_SIZE;
-
-    return NO_ERROR;
+    OR_GET_INT64 (m_ptr, value);
+    m_ptr += OR_BIGINT_SIZE;
   }
 
-  int
+  void
   packer::pack_bigint (const std::uint64_t *value)
   {
-    assert (m_type == type::PACK);
     align (MAX_ALIGNMENT);
-    check_range (m_write_ptr, m_end_ptr, OR_BIGINT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_BIGINT_SIZE);
 
-    OR_PUT_INT64 (m_write_ptr, value);
-    m_write_ptr += OR_BIGINT_SIZE;
-
-    return NO_ERROR;
+    OR_PUT_INT64 (m_ptr, value);
+    m_ptr += OR_BIGINT_SIZE;
   }
 
-  int packer::unpack_bigint (std::uint64_t *value)
+  void
+  unpacker::unpack_bigint (std::uint64_t *value)
   {
     align (MAX_ALIGNMENT);
-    check_range (m_read_ptr, m_end_ptr, OR_BIGINT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_BIGINT_SIZE);
 
-    OR_GET_INT64 (m_read_ptr, value);
-    m_read_ptr += OR_BIGINT_SIZE;
-
-    return NO_ERROR;
+    OR_GET_INT64 (m_ptr, value);
+    m_ptr += OR_BIGINT_SIZE;
   }
 
-  int
+  void
   packer::pack_int_array (const int *array, const int count)
   {
-    assert (m_type == type::PACK);
-
-    int i;
-
     align (INT_ALIGNMENT);
-    check_range (m_write_ptr, m_end_ptr, (OR_INT_SIZE * (count + 1)));
+    check_range (m_ptr, m_end_ptr, (OR_INT_SIZE * (count + 1)));
 
-    OR_PUT_INT (m_write_ptr, count);
-    m_write_ptr += OR_INT_SIZE;
-    for (i = 0; i < count; i++)
+    OR_PUT_INT (m_ptr, count);
+    m_ptr += OR_INT_SIZE;
+    for (int i = 0; i < count; i++)
       {
-	OR_PUT_INT (m_write_ptr, array[i]);
-	m_write_ptr += OR_INT_SIZE;
+	OR_PUT_INT (m_ptr, array[i]);
+	m_ptr += OR_INT_SIZE;
       }
-
-    return NO_ERROR;
   }
 
-  int
-  packer::unpack_int_array (int *array, int &count)
+  void
+  unpacker::unpack_int_array (int *array, int &count)
   {
-    int i;
-
     align (INT_ALIGNMENT);
-    check_range (m_read_ptr, m_end_ptr, OR_INT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_INT_SIZE);
 
-    count = OR_GET_INT (m_read_ptr);
-    m_read_ptr += OR_INT_SIZE;
+    count = OR_GET_INT (m_ptr);
+    m_ptr += OR_INT_SIZE;
 
     if (count == 0)
       {
-	return NO_ERROR;
+	return;
       }
 
-    check_range (m_read_ptr, m_end_ptr, OR_INT_SIZE * count);
+    check_range (m_ptr, m_end_ptr, OR_INT_SIZE * count);
 
-    for (i = 0; i < count; i++)
+    for (int i = 0; i < count; i++)
       {
-	array[i] = OR_GET_INT (m_read_ptr);
-	m_read_ptr += OR_INT_SIZE;
+	array[i] = OR_GET_INT (m_ptr);
+	m_ptr += OR_INT_SIZE;
       }
-
-    return NO_ERROR;
   }
 
   size_t
@@ -266,49 +241,41 @@ namespace cubpacking
     return DB_ALIGN (curr_offset, INT_ALIGNMENT) - curr_offset + (OR_INT_SIZE * (count + 1));
   }
 
-  int
+  void
   packer::pack_int_vector (const std::vector<int> &array)
   {
-    assert (m_type == type::PACK);
-
     const int count = (const int) array.size ();
-    int i;
 
     align (INT_ALIGNMENT);
-    check_range (m_write_ptr, m_end_ptr, (OR_INT_SIZE * (count + 1)));
+    check_range (m_ptr, m_end_ptr, (OR_INT_SIZE * (count + 1)));
 
-    OR_PUT_INT (m_write_ptr, count);
-    m_write_ptr += OR_INT_SIZE;
-    for (i = 0; i < count; i++)
+    OR_PUT_INT (m_ptr, count);
+    m_ptr += OR_INT_SIZE;
+    for (int i = 0; i < count; i++)
       {
-	OR_PUT_INT (m_write_ptr, array[i]);
-	m_write_ptr += OR_INT_SIZE;
+	OR_PUT_INT (m_ptr, array[i]);
+	m_ptr += OR_INT_SIZE;
       }
-
-    return NO_ERROR;
   }
 
-  int
-  packer::unpack_int_vector (std::vector<int> &array)
+  void
+  unpacker::unpack_int_vector (std::vector<int> &array)
   {
-    int i;
     int count;
 
     align (INT_ALIGNMENT);
-    check_range (m_read_ptr, m_end_ptr, OR_INT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_INT_SIZE);
 
-    count = OR_GET_INT (m_read_ptr);
-    m_read_ptr += OR_INT_SIZE;
+    count = OR_GET_INT (m_ptr);
+    m_ptr += OR_INT_SIZE;
 
-    check_range (m_read_ptr, m_end_ptr, OR_INT_SIZE * count);
+    check_range (m_ptr, m_end_ptr, OR_INT_SIZE * count);
 
-    for (i = 0; i < count; i++)
+    for (int i = 0; i < count; i++)
       {
-	array.push_back (OR_GET_INT (m_read_ptr));
-	m_read_ptr += OR_INT_SIZE;
+	array.push_back (OR_GET_INT (m_ptr));
+	m_ptr += OR_INT_SIZE;
       }
-
-    return NO_ERROR;
   }
 
   size_t
@@ -320,42 +287,36 @@ namespace cubpacking
     return aligned_size + aligned_offset - curr_offset;
   }
 
-  int
+  void
   packer::pack_db_value (const DB_VALUE &value)
   {
-    assert (m_type == type::PACK);
-
     char *old_ptr;
 
     size_t value_size = or_packed_value_size (&value, 1, 1, 0);
 
     align (MAX_ALIGNMENT);
-    check_range (m_write_ptr, m_end_ptr, value_size);
-    old_ptr = m_write_ptr;
+    check_range (m_ptr, m_end_ptr, value_size);
+    old_ptr = m_ptr;
 
-    m_write_ptr = or_pack_value (m_write_ptr, (DB_VALUE *) &value);
-    assert (old_ptr + value_size == m_write_ptr);
+    m_ptr = or_pack_value (m_ptr, (DB_VALUE *) &value);
+    assert (old_ptr + value_size == m_ptr);
 
-    check_range (m_write_ptr, m_end_ptr, 0);
-
-    return NO_ERROR;
+    check_range (m_ptr, m_end_ptr, 0);
   }
 
-  int
-  packer::unpack_db_value (DB_VALUE *value)
+  void
+  unpacker::unpack_db_value (DB_VALUE *value)
   {
     const char *old_ptr;
 
     align (MAX_ALIGNMENT);
-    old_ptr = m_read_ptr;
-    m_read_ptr = or_unpack_value (m_read_ptr, value);
+    old_ptr = m_ptr;
+    m_ptr = or_unpack_value (m_ptr, value);
 
     size_t value_size = or_packed_value_size (value, 1, 1, 0);
-    assert (old_ptr + value_size == m_read_ptr);
+    assert (old_ptr + value_size == m_ptr);
 
-    check_range (m_read_ptr, m_end_ptr, 0);
-
-    return NO_ERROR;
+    check_range (m_ptr, m_end_ptr, 0);
   }
 
   size_t
@@ -368,56 +329,55 @@ namespace cubpacking
     return DB_ALIGN (curr_offset + entry_size, INT_ALIGNMENT) - curr_offset;
   }
 
-  int
+  void
   packer::pack_small_string (const char *string)
   {
-    assert (m_type == type::PACK);
-
     size_t len;
 
     len = strlen (string);
 
     if (len > MAX_SMALL_STRING_SIZE)
       {
-	return ER_FAILED;
+	assert (false);
+	pack_c_string (string, len);
+	return;
       }
 
-    check_range (m_write_ptr, m_end_ptr, len + 1);
+    check_range (m_ptr, m_end_ptr, len + 1);
 
-    OR_PUT_BYTE (m_write_ptr, len);
-    m_write_ptr += OR_BYTE_SIZE;
+    OR_PUT_BYTE (m_ptr, len);
+    m_ptr += OR_BYTE_SIZE;
     if (len > 0)
       {
-	std::memcpy (m_write_ptr, string, len);
-	m_write_ptr += len;
+	std::memcpy (m_ptr, string, len);
+	m_ptr += len;
       }
 
     align (INT_ALIGNMENT);
-
-    return NO_ERROR;
   }
 
-  int
-  packer::unpack_small_string (char *string, const size_t max_size)
+  void
+  unpacker::unpack_small_string (char *string, const size_t max_size)
   {
     size_t len;
 
-    check_range (m_read_ptr, m_end_ptr, OR_BYTE_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_BYTE_SIZE);
 
-    len = OR_GET_BYTE (m_read_ptr);
+    len = OR_GET_BYTE (m_ptr);
     if (len > max_size)
       {
-	return ER_FAILED;
+	assert (false);
+	return;
       }
 
-    m_read_ptr += OR_BYTE_SIZE;
+    m_ptr += OR_BYTE_SIZE;
 
-    check_range (m_read_ptr, m_end_ptr, len);
+    check_range (m_ptr, m_end_ptr, len);
     if (len > 0)
       {
-	std::memcpy (string, m_read_ptr, len);
+	std::memcpy (string, m_ptr, len);
 	string[len] = '\0';
-	m_read_ptr += len;
+	m_ptr += len;
       }
     else
       {
@@ -425,8 +385,6 @@ namespace cubpacking
       }
 
     align (INT_ALIGNMENT);
-
-    return NO_ERROR;
   }
 
 
@@ -440,51 +398,45 @@ namespace cubpacking
     return DB_ALIGN (curr_offset + entry_size, INT_ALIGNMENT) - curr_offset;
   }
 
-  int
+  void
   packer::pack_large_string (const std::string &str)
   {
-    assert (m_type == type::PACK);
-
     size_t len;
 
     len = str.size ();
 
     align (INT_ALIGNMENT);
-    check_range (m_write_ptr, m_end_ptr, len + OR_INT_SIZE);
+    check_range (m_ptr, m_end_ptr, len + OR_INT_SIZE);
 
-    OR_PUT_INT (m_write_ptr, len);
-    m_write_ptr += OR_INT_SIZE;
+    OR_PUT_INT (m_ptr, len);
+    m_ptr += OR_INT_SIZE;
 
-    std::memcpy (m_write_ptr, str.c_str (), len);
-    m_write_ptr += len;
+    std::memcpy (m_ptr, str.c_str (), len);
+    m_ptr += len;
 
     align (INT_ALIGNMENT);
-
-    return NO_ERROR;
   }
 
-  int
-  packer::unpack_large_string (std::string &str)
+  void
+  unpacker::unpack_large_string (std::string &str)
   {
     size_t len;
 
     align (INT_ALIGNMENT);
 
-    check_range (m_read_ptr, m_end_ptr, OR_INT_SIZE);
+    check_range (m_ptr, m_end_ptr, OR_INT_SIZE);
 
-    len = OR_GET_INT (m_read_ptr);
-    m_read_ptr += OR_INT_SIZE;
+    len = OR_GET_INT (m_ptr);
+    m_ptr += OR_INT_SIZE;
 
     if (len > 0)
       {
-	check_range (m_read_ptr, m_end_ptr, len);
-	str = std::string (m_read_ptr, len);
-	m_read_ptr += len;
+	check_range (m_ptr, m_end_ptr, len);
+	str = std::string (m_ptr, len);
+	m_ptr += len;
       }
 
     align (INT_ALIGNMENT);
-
-    return NO_ERROR;
   }
 
   size_t
@@ -493,38 +445,36 @@ namespace cubpacking
     return get_packed_c_string_size (str.c_str (), str.size (), curr_offset);
   }
 
-  int
+  void
   packer::pack_string (const std::string &str)
   {
     size_t len = str.size ();
 
-    return pack_c_string (str.c_str (), len);
+    pack_c_string (str.c_str (), len);
   }
 
-  int
-  packer::unpack_string (std::string &str)
+  void
+  unpacker::unpack_string (std::string &str)
   {
     size_t len;
 
-    check_range (m_read_ptr, m_end_ptr, 1);
+    check_range (m_ptr, m_end_ptr, 1);
 
-    len = OR_GET_BYTE (m_read_ptr);
+    len = OR_GET_BYTE (m_ptr);
 
     if (len == LARGE_STRING_CODE)
       {
-	m_read_ptr++;
-	return unpack_large_string (str);
+	m_ptr++;
+	unpack_large_string (str);
       }
     else
       {
-	m_read_ptr++;
+	m_ptr++;
 
-	str = std::string (m_read_ptr, len);
-	m_read_ptr += len;
+	str = std::string (m_ptr, len);
+	m_ptr += len;
 
 	align (INT_ALIGNMENT);
-
-	return NO_ERROR;
       }
   }
 
@@ -545,79 +495,77 @@ namespace cubpacking
     return DB_ALIGN (curr_offset + entry_size, INT_ALIGNMENT) - curr_offset;
   }
 
-  int
+  void
   packer::pack_c_string (const char *str, const size_t str_size)
   {
     if (str_size < MAX_SMALL_STRING_SIZE)
       {
-	return pack_small_string (str);
+	pack_small_string (str);
       }
     else
       {
-	check_range (m_write_ptr, m_end_ptr, str_size + 1 + OR_INT_SIZE);
+	check_range (m_ptr, m_end_ptr, str_size + 1 + OR_INT_SIZE);
 
-	OR_PUT_BYTE (m_write_ptr, LARGE_STRING_CODE);
-	m_write_ptr++;
+	OR_PUT_BYTE (m_ptr, LARGE_STRING_CODE);
+	m_ptr++;
 
-	return pack_large_string (str);
+	pack_large_string (str);
       }
   }
 
-  int
-  packer::unpack_c_string (char *str, const size_t max_str_size)
+  void
+  unpacker::unpack_c_string (char *str, const size_t max_str_size)
   {
     size_t len;
 
-    check_range (m_read_ptr, m_end_ptr, 1);
-    len = OR_GET_BYTE (m_read_ptr);
+    check_range (m_ptr, m_end_ptr, 1);
+    len = OR_GET_BYTE (m_ptr);
     if (len == LARGE_STRING_CODE)
       {
-	m_read_ptr++;
+	m_ptr++;
 
 	align (OR_INT_SIZE);
 
-	len = OR_GET_INT (m_read_ptr);
-	m_read_ptr += OR_INT_SIZE;
+	len = OR_GET_INT (m_ptr);
+	m_ptr += OR_INT_SIZE;
       }
     else
       {
-	m_read_ptr++;
+	m_ptr++;
       }
 
     if (len >= max_str_size)
       {
-	return ER_FAILED;
+	assert (false);
+	return;
       }
     if (len > 0)
       {
-	check_range (m_read_ptr, m_end_ptr, len);
-	memcpy (str, m_read_ptr, len);
-	m_read_ptr += len;
+	check_range (m_ptr, m_end_ptr, len);
+	memcpy (str, m_ptr, len);
+	m_ptr += len;
       }
 
     str[len] = '\0';
 
     align (INT_ALIGNMENT);
-
-    return NO_ERROR;
   }
 
   void
   packer::assign_or_buf (const size_t size, or_buf &buf)
   {
-    if (m_type == type::PACK)
-      {
-	check_range (m_write_ptr, m_end_ptr, size);
-	m_write_ptr += size;
-	OR_BUF_INIT (buf, m_write_ptr, size);
-      }
-    else
-      {
-	check_range (m_read_ptr, m_end_ptr, size);
-	m_read_ptr += size;
-	// promise you won't write on it!
-	OR_BUF_INIT (buf, const_cast <char *> (m_read_ptr), size);
-      }
+    check_range (m_ptr, m_end_ptr, size);
+    m_ptr += size;
+    OR_BUF_INIT (buf, m_ptr, size);
+  }
+
+  void
+  unpacker::assign_or_buf (const size_t size, or_buf &buf)
+  {
+    check_range (m_ptr, m_end_ptr, size);
+    m_ptr += size;
+    // promise you won't write on it!
+    OR_BUF_INIT (buf, const_cast <char *> (m_ptr), size);
   }
 
 } /* namespace cubpacking */
