@@ -35,11 +35,10 @@
 struct or_buf;
 
 /*
- * the packer object packs or unpacks primitive objects from/into a buffer
- * the buffer is provided at initialization
- * each object is atomically packed into the buffer.
- * (atomically == means no other object could insert sub-objects in the middle of the packing of
- * currently serialized object)
+ * the packer object packs primitive objects from a buffer and unpacker unpacks same objects from the buffer.
+ * the packer & unpacker implementations should be mirrored.
+ *
+ * the buffer is provided at initialization; packer/unpacker classes are not meant for multi-threaded access.
  */
 namespace cubpacking
 {
@@ -100,7 +99,7 @@ namespace cubpacking
 
       size_t get_current_size (void)
       {
-	return get_curr_ptr () - get_packer_buffer ();
+	return get_curr_ptr () - get_buffer_start ();
       }
 
       void align (const size_t req_alignment)
@@ -108,19 +107,19 @@ namespace cubpacking
 	m_ptr = PTR_ALIGN (m_ptr, req_alignment);
       };
 
-      const char *get_packer_buffer (void)
+      const char *get_buffer_start (void)
       {
 	return m_start_ptr;
       };
 
-      const char *get_packer_end (void)
+      const char *get_buffer_end (void)
       {
 	return m_end_ptr;
       };
 
       bool is_ended (void)
       {
-	return get_curr_ptr () == get_packer_end ();
+	return get_curr_ptr () == get_buffer_end ();
       }
 
     private:
@@ -167,22 +166,22 @@ namespace cubpacking
 
       size_t get_current_size (void)
       {
-	return get_curr_ptr () - get_packer_buffer ();
+	return get_curr_ptr () - get_buffer_start ();
       }
 
-      const char *get_packer_buffer (void)
+      const char *get_buffer_start (void)
       {
 	return m_start_ptr;
       };
 
-      const char *get_packer_end (void)
+      const char *get_buffer_end (void)
       {
 	return m_end_ptr;
       };
 
       bool is_ended (void)
       {
-	return get_curr_ptr () == get_packer_end ();
+	return get_curr_ptr () == get_buffer_end ();
       }
 
       // packer should gradually replace OR_BUF, but they will coexist for a while. there will be functionality
