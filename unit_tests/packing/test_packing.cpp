@@ -42,8 +42,8 @@ namespace test_packing
   void po1::pack (cubpacking::packer *serializator) const
   {
     serializator->pack_int (i1);
-    serializator->pack_short (&sh1);
-    serializator->pack_bigint (&b1);
+    serializator->pack_short (sh1);
+    serializator->pack_bigint (b1);
     serializator->pack_int_array (int_a, sizeof (int_a) / sizeof (int_a[0]));
     serializator->pack_int_vector (int_v);
     for (int i = 0; i < sizeof (values) / sizeof (values[0]); i++)
@@ -62,9 +62,9 @@ namespace test_packing
   {
     int cnt = 0;
 
-    deserializator->unpack_int (&i1);
-    deserializator->unpack_short (&sh1);
-    deserializator->unpack_bigint (&b1);
+    deserializator->unpack_int (i1);
+    deserializator->unpack_short (sh1);
+    deserializator->unpack_bigint (b1);
     deserializator->unpack_int_array (int_a, cnt);
     assert (cnt == sizeof (int_a) / sizeof (int_a[0]));
 
@@ -72,7 +72,7 @@ namespace test_packing
 
     for (int i = 0; i < sizeof (values) / sizeof (values[0]); i++)
       {
-	deserializator->unpack_db_value (&values[i]);
+	deserializator->unpack_db_value (values[i]);
       }
     deserializator->unpack_small_string (small_str, sizeof (small_str));
     deserializator->unpack_large_string (large_str);

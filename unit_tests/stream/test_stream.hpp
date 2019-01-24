@@ -222,10 +222,10 @@ namespace test_stream
       int unpack_stream_entry_header ()
       {
 	cubpacking::unpacker *serializator = get_unpacker ();
-	serializator->unpack_int ((int *) &m_header.tran_id);
-	serializator->unpack_int ((int *) &m_header.mvcc_id);
-	serializator->unpack_int ((int *) &m_header.count_objects);
-	serializator->unpack_int (&m_header.data_size);
+	serializator->unpack_int (m_header.tran_id);
+	serializator->unpack_int (m_header.mvcc_id);
+	serializator->unpack_int (reinterpret_cast<int &> (m_header.count_objects)); // is this safe?
+	serializator->unpack_int (m_header.data_size);
 
 	return NO_ERROR;
       };

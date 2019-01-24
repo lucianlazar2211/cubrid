@@ -50,17 +50,18 @@ namespace cubpacking
       packer (char *storage, const size_t amount);
       void set_buffer (char *storage, const size_t amount);
 
-      void init_for_unpacking (const char *storage, const size_t amount);
-
       size_t get_packed_int_size (size_t curr_offset);
       void pack_int (const int value);
 
+      size_t get_packed_bool_size (size_t curr_offset);
+      void pack_bool (bool value);
+
       size_t get_packed_short_size (size_t curr_offset);
-      void pack_short (const short *value);
+      void pack_short (const short value);
 
       size_t get_packed_bigint_size (size_t curr_offset);
-      void pack_bigint (const std::int64_t *value);
-      void pack_bigint (const std::uint64_t *value);
+      void pack_bigint (const std::int64_t &value);
+      void pack_bigint (const std::uint64_t &value);
 
       void pack_int_array (const int *array, const int count);
 
@@ -135,22 +136,24 @@ namespace cubpacking
       unpacker (const char *storage, const size_t amount);
       void set_buffer (const char *storage, const size_t amount);
 
-      void unpack_int (int *value);
-      void peek_unpack_int (int *value);
+      void unpack_int (int &value);
+      void peek_unpack_int (int &value);
       void unpack_int_array (int *array, int &count);
       void unpack_int_vector (std::vector <int> &array);
 
-      void unpack_short (short *value);
+      void unpack_bool (bool &value);
 
-      void unpack_bigint (std::int64_t *value);
-      void unpack_bigint (std::uint64_t *value);
+      void unpack_short (short &value);
+
+      void unpack_bigint (std::int64_t &value);
+      void unpack_bigint (std::uint64_t &value);
 
       void unpack_small_string (char *string, const size_t max_size);
       void unpack_large_string (std::string &str);
       void unpack_string (std::string &str);
       void unpack_c_string (char *str, const size_t max_str_size);
 
-      void unpack_db_value (DB_VALUE *value);
+      void unpack_db_value (DB_VALUE &value);
 
       const char *get_curr_ptr (void)
       {

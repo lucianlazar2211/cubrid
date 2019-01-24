@@ -118,8 +118,8 @@ namespace test_stream
     serializator->pack_int (po1::ID);
 
     serializator->pack_int (i1);
-    serializator->pack_short (&sh1);
-    serializator->pack_bigint (&b1);
+    serializator->pack_short (sh1);
+    serializator->pack_bigint (b1);
     serializator->pack_int_array (int_a, sizeof (int_a) / sizeof (int_a[0]));
     serializator->pack_int_vector (int_v);
     for (unsigned int i = 0; i < sizeof (values) / sizeof (values[0]); i++)
@@ -138,12 +138,12 @@ namespace test_stream
   {
     int cnt;
 
-    deserializator->unpack_int (&cnt);
+    deserializator->unpack_int (cnt);
     assert (cnt == po1::ID);
 
-    deserializator->unpack_int (&i1);
-    deserializator->unpack_short (&sh1);
-    deserializator->unpack_bigint (&b1);
+    deserializator->unpack_int (i1);
+    deserializator->unpack_short (sh1);
+    deserializator->unpack_bigint (b1);
     deserializator->unpack_int_array (int_a, cnt);
     assert (cnt == sizeof (int_a) / sizeof (int_a[0]));
 
@@ -151,7 +151,7 @@ namespace test_stream
 
     for (unsigned int i = 0; i < sizeof (values) / sizeof (values[0]); i++)
       {
-	deserializator->unpack_db_value (&values[i]);
+	deserializator->unpack_db_value (values[i]);
       }
     deserializator->unpack_small_string (small_str, sizeof (small_str));
     deserializator->unpack_large_string (large_str);
@@ -313,7 +313,7 @@ namespace test_stream
   {
     int id;
 
-    deserializator->unpack_int (&id);
+    deserializator->unpack_int (id);
 
     deserializator->unpack_large_string (large_str);
   }

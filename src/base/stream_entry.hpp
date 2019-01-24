@@ -163,7 +163,7 @@ namespace cubstream
 	  {
 	    deserializator->align (MAX_ALIGNMENT);
 	    /* peek type of object : it will be consumed by object's unpack */
-	    deserializator->peek_unpack_int (&object_id);
+	    deserializator->peek_unpack_int (object_id);
 
 	    PO *packable_entry = get_builder ()->create_object (object_id);
 	    if (packable_entry == NULL)

@@ -181,27 +181,24 @@ namespace cubreplication
     save_heapid = db_private_set_heapid_to_thread (NULL, 0);
 #endif
     /* create id */
-    deserializator->unpack_int (&int_val);
+    deserializator->unpack_int (int_val);
 
     /* RBR type */
-    deserializator->unpack_int (&int_val);
+    deserializator->unpack_int (int_val);
     m_type = (REPL_ENTRY_TYPE) int_val;
 
     deserializator->unpack_int_vector (changed_attributes);
 
     deserializator->unpack_small_string (m_class_name, sizeof (m_class_name) - 1);
 
-    deserializator->unpack_db_value (&m_key_value);
+    deserializator->unpack_db_value (m_key_value);
 
-    deserializator->unpack_int (&count_new_values);
+    deserializator->unpack_int (count_new_values);
 
     for (i = 0; i < count_new_values; i++)
       {
-	DB_VALUE val;
-
-	/* this copies the DB_VALUE to contain, should we avoid this ? */
-	m_new_values.push_back (val);
-	deserializator->unpack_db_value (&val);
+	m_new_values.emplace_back ();
+	deserializator->unpack_db_value (m_new_values.back ());
       }
 
 #if defined (SERVER_MODE)
@@ -250,7 +247,7 @@ namespace cubreplication
   {
     int entry_type_not_used;
 
-    deserializator->unpack_int (&entry_type_not_used);
+    deserializator->unpack_int (entry_type_not_used);
     deserializator->unpack_large_string (m_statement);
   }
 

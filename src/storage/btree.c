@@ -36210,29 +36210,29 @@ btree_object_adjust_flags_for_location (const btree_object_location & location, 
 static void
 btree_packer_pack_mvccid (packing_packer & packer, MVCCID mvccid)
 {
-  packer.pack_bigint (&mvccid);
+  packer.pack_bigint (mvccid);
 }
 
 static void
 btree_packer_unpack_mvccid (packing_unpacker & packer, MVCCID & mvccid)
 {
-  packer.unpack_bigint (&mvccid);
+  packer.unpack_bigint (mvccid);
 }
 
 static void
 btree_packer_pack_oid (packing_packer & packer, const OID & oid)
 {
   packer.pack_int (oid.pageid);
-  packer.pack_short (&oid.slotid);
-  packer.pack_short (&oid.volid);
+  packer.pack_short (oid.slotid);
+  packer.pack_short (oid.volid);
 }
 
 static void
 btree_packer_unpack_oid (packing_unpacker & packer, OID & oid)
 {
-  packer.unpack_int (&oid.pageid);
-  packer.unpack_short (&oid.slotid);
-  packer.unpack_short (&oid.volid);
+  packer.unpack_int (oid.pageid);
+  packer.unpack_short (oid.slotid);
+  packer.unpack_short (oid.volid);
 }
 
 static void
@@ -36240,16 +36240,16 @@ btree_packer_pack_btid (packing_packer & packer, const BTID & btid)
 {
   packer.pack_int (btid.root_pageid);       // 4 bytes
   packer.pack_int (btid.vfid.fileid);       // 4 bytes
-  packer.pack_short (&btid.vfid.volid);     // 2 bytes
+  packer.pack_short (btid.vfid.volid);     // 2 bytes
   packer.align (INT_ALIGNMENT);             // 2 bytes
 }
 
 static void
 btree_packer_unpack_btid (packing_unpacker & packer, BTID & btid)
 {
-  packer.unpack_int (&btid.root_pageid);
-  packer.unpack_int (&btid.vfid.fileid);
-  packer.unpack_short (&btid.vfid.volid);
+  packer.unpack_int (btid.root_pageid);
+  packer.unpack_int (btid.vfid.fileid);
+  packer.unpack_short (btid.vfid.volid);
   packer.align (INT_ALIGNMENT);
 }
 
@@ -36257,15 +36257,15 @@ static void
 btree_packer_pack_vpid (packing_packer & packer, const VPID & vpid)
 {
   packer.pack_int (vpid.pageid);
-  packer.pack_short (&vpid.volid);
+  packer.pack_short (vpid.volid);
   packer.align (INT_ALIGNMENT);
 }
 
 static void
 btree_packer_unpack_vpid (packing_unpacker & packer, VPID & vpid)
 {
-  packer.unpack_int (&vpid.pageid);
-  packer.unpack_short (&vpid.volid);
+  packer.unpack_int (vpid.pageid);
+  packer.unpack_short (vpid.volid);
   packer.align (INT_ALIGNMENT);
 }
 
@@ -36293,11 +36293,11 @@ btree_packer_pack_object (packing_packer & packer, const btree_object_location &
   // now pack mvcc info
   if (btree_mvcc_info_has_insid (&object.mvcc_info))
     {
-      packer.pack_bigint (&object.mvcc_info.insert_mvccid);
+      packer.pack_bigint (object.mvcc_info.insert_mvccid);
     }
   if (btree_mvcc_info_has_delid (&object.mvcc_info))
     {
-      packer.pack_bigint (&object.mvcc_info.delete_mvccid);
+      packer.pack_bigint (object.mvcc_info.delete_mvccid);
     }
 }
 
@@ -36332,11 +36332,11 @@ btree_packer_unpack_object (packing_unpacker & packer, const btree_object_locati
   // now unpack mvcc info
   if (btree_mvcc_info_has_insid (&object.mvcc_info))
     {
-      packer.unpack_bigint (&object.mvcc_info.insert_mvccid);
+      packer.unpack_bigint (object.mvcc_info.insert_mvccid);
     }
   if (btree_mvcc_info_has_delid (&object.mvcc_info))
     {
-      packer.unpack_bigint (&object.mvcc_info.delete_mvccid);
+      packer.unpack_bigint (object.mvcc_info.delete_mvccid);
     }
 }
 
@@ -36353,11 +36353,11 @@ btree_packer_pack_object_no_class (packing_packer & packer, const btree_object_i
   // now pack mvcc info
   if (btree_mvcc_info_has_insid (&object.mvcc_info))
     {
-      packer.pack_bigint (&object.mvcc_info.insert_mvccid);
+      packer.pack_bigint (object.mvcc_info.insert_mvccid);
     }
   if (btree_mvcc_info_has_delid (&object.mvcc_info))
     {
-      packer.pack_bigint (&object.mvcc_info.delete_mvccid);
+      packer.pack_bigint (object.mvcc_info.delete_mvccid);
     }
 }
 
@@ -36375,11 +36375,11 @@ btree_packer_unpack_object_no_class (packing_unpacker & packer, btree_object_inf
   // now unpack mvcc info
   if (btree_mvcc_info_has_insid (&object.mvcc_info))
     {
-      packer.unpack_bigint (&object.mvcc_info.insert_mvccid);
+      packer.unpack_bigint (object.mvcc_info.insert_mvccid);
     }
   if (btree_mvcc_info_has_delid (&object.mvcc_info))
     {
-      packer.unpack_bigint (&object.mvcc_info.delete_mvccid);
+      packer.unpack_bigint (object.mvcc_info.delete_mvccid);
     }
 }
 

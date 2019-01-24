@@ -89,7 +89,6 @@ namespace cubpacking
     m_end_ptr = m_start_ptr + amount;
   }
 
-
   size_t
   packer::get_packed_int_size (size_t curr_offset)
   {
@@ -107,22 +106,43 @@ namespace cubpacking
   }
 
   void
-  unpacker::unpack_int (int *value)
+  unpacker::unpack_int (int &value)
   {
     align (INT_ALIGNMENT);
     check_range (m_ptr, m_end_ptr, OR_INT_SIZE);
 
-    *value = OR_GET_INT (m_ptr);
+    value = OR_GET_INT (m_ptr);
     m_ptr += OR_INT_SIZE;
   }
 
   void
-  unpacker::peek_unpack_int (int *value)
+  unpacker::peek_unpack_int (int &value)
   {
     align (INT_ALIGNMENT);
     check_range (m_ptr, m_end_ptr, OR_INT_SIZE);
 
-    *value = OR_GET_INT (m_ptr);
+    value = OR_GET_INT (m_ptr);
+  }
+
+  size_t
+  packer::get_packed_bool_size (size_t curr_offset)
+  {
+    return get_packed_int_size (curr_offset);
+  }
+
+  void
+  packer::pack_bool (bool value)
+  {
+    pack_int (value ? 1 : 0);
+  }
+
+  void
+  unpacker::unpack_bool (bool &value)
+  {
+    int int_val;
+    unpack_int (int_val);
+    assert (int_val == 1 || int_val == 0);
+    value = int_val != 0;
   }
 
   size_t
@@ -132,22 +152,22 @@ namespace cubpacking
   }
 
   void
-  packer::pack_short (const short *value)
+  packer::pack_short (const short value)
   {
     align (SHORT_ALIGNMENT);
     check_range (m_ptr, m_end_ptr, OR_SHORT_SIZE);
 
-    OR_PUT_SHORT (m_ptr, *value);
+    OR_PUT_SHORT (m_ptr, value);
     m_ptr += OR_SHORT_SIZE;
   }
 
   void
-  unpacker::unpack_short (short *value)
+  unpacker::unpack_short (short &value)
   {
     align (SHORT_ALIGNMENT);
     check_range (m_ptr, m_end_ptr, OR_SHORT_SIZE);
 
-    *value = OR_GET_SHORT (m_ptr);
+    value = OR_GET_SHORT (m_ptr);
     m_ptr += OR_SHORT_SIZE;
   }
 
@@ -158,42 +178,42 @@ namespace cubpacking
   }
 
   void
-  packer::pack_bigint (const std::int64_t *value)
+  packer::pack_bigint (const std::int64_t &value)
   {
     align (MAX_ALIGNMENT);
     check_range (m_ptr, m_end_ptr, OR_BIGINT_SIZE);
 
-    OR_PUT_INT64 (m_ptr, value);
+    OR_PUT_INT64 (m_ptr, &value);
     m_ptr += OR_BIGINT_SIZE;
   }
 
   void
-  unpacker::unpack_bigint (std::int64_t *value)
+  unpacker::unpack_bigint (std::int64_t &value)
   {
     align (MAX_ALIGNMENT);
     check_range (m_ptr, m_end_ptr, OR_BIGINT_SIZE);
 
-    OR_GET_INT64 (m_ptr, value);
+    OR_GET_INT64 (m_ptr, &value);
     m_ptr += OR_BIGINT_SIZE;
   }
 
   void
-  packer::pack_bigint (const std::uint64_t *value)
+  packer::pack_bigint (const std::uint64_t &value)
   {
     align (MAX_ALIGNMENT);
     check_range (m_ptr, m_end_ptr, OR_BIGINT_SIZE);
 
-    OR_PUT_INT64 (m_ptr, value);
+    OR_PUT_INT64 (m_ptr, &value);
     m_ptr += OR_BIGINT_SIZE;
   }
 
   void
-  unpacker::unpack_bigint (std::uint64_t *value)
+  unpacker::unpack_bigint (std::uint64_t &value)
   {
     align (MAX_ALIGNMENT);
     check_range (m_ptr, m_end_ptr, OR_BIGINT_SIZE);
 
-    OR_GET_INT64 (m_ptr, value);
+    OR_GET_INT64 (m_ptr, &value);
     m_ptr += OR_BIGINT_SIZE;
   }
 
@@ -305,15 +325,15 @@ namespace cubpacking
   }
 
   void
-  unpacker::unpack_db_value (DB_VALUE *value)
+  unpacker::unpack_db_value (DB_VALUE &value)
   {
     const char *old_ptr;
 
     align (MAX_ALIGNMENT);
     old_ptr = m_ptr;
-    m_ptr = or_unpack_value (m_ptr, value);
+    m_ptr = or_unpack_value (m_ptr, &value);
 
-    size_t value_size = or_packed_value_size (value, 1, 1, 0);
+    size_t value_size = or_packed_value_size (&value, 1, 1, 0);
     assert (old_ptr + value_size == m_ptr);
 
     check_range (m_ptr, m_end_ptr, 0);
