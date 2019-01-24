@@ -106,7 +106,7 @@ namespace cubstream
 	  }
 	serializator->align (MAX_ALIGNMENT);
 
-	int packed_amount = (int) (serializator->get_curr_ptr () - serializator->get_packer_buffer ());
+	int packed_amount = (int) (serializator->get_curr_ptr () - serializator->get_buffer_start ());
 
 	return packed_amount;
       };
