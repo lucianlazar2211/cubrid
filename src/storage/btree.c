@@ -37760,7 +37760,7 @@ btree_key_record::create_key_record (btree_object_info & object)
     }
 
   // insert record
-  record_descriptor record (data_packer.get_packer_buffer (), data_packer.get_current_size ());
+  record_descriptor record (data_packer.get_buffer_start (), data_packer.get_current_size ());
   if (spage_insert_at (m_leaf_record.m_node_context.m_thread, m_leaf_record.m_node_context.m_page,
                        m_leaf_record.m_slotid, &record.get_recdes ()) != SP_SUCCESS)
     {
@@ -37793,7 +37793,7 @@ btree_key_record::create_key_record (btree_object_info & object)
 
   // put record data
   m_leaf_record.m_logger.set_rv_record_change (LOG_RV_RECORD_INSERT);
-  m_leaf_record.m_logger.append_redo_data (data_packer.get_current_size (), data_packer.get_packer_buffer ());
+  m_leaf_record.m_logger.append_redo_data (data_packer.get_current_size (), data_packer.get_buffer_start ());
 
   // log changes
   m_leaf_record.m_logger.log ();
@@ -37887,7 +37887,7 @@ btree_logging_context::end_sysop ()
       break;
     case btree_logging_context::type::ACTIVE_UNDOREDO:
       log_sysop_end_logical_undo (thread_p, m_rcv_index, NULL, (int) m_logical_undo_data->get_current_size (),
-                                  m_logical_undo_data->get_packer_buffer ());
+                                  m_logical_undo_data->get_buffer_start ());
       break;
     case btree_logging_context::type::ACTIVE_UNDOREDO_AND_POSTPONE:
       // log_append_postpone is currently bound to a page that we don't have here. if this case becomes possible,
@@ -38049,15 +38049,15 @@ btree_page_logger::log (size_t redo_size, const char *redo_data)
       case btree_logging_context::type::ACTIVE_UNDOREDO:
         log_append_undoredo_data (thread_p, m_context.m_rcv_index, &m_addr,
                                   (int) m_context.m_logical_undo_data->get_current_size (),
-                                  (int) redo_size, m_context.m_logical_undo_data->get_packer_buffer (), redo_data);
+                                  (int) redo_size, m_context.m_logical_undo_data->get_buffer_start (), redo_data);
         break;
       case btree_logging_context::type::ACTIVE_UNDOREDO_AND_POSTPONE:
         log_append_undoredo_data (thread_p, m_context.m_rcv_index, &m_addr,
                                   (int) m_context.m_logical_undo_data->get_current_size (),
-                                  (int) redo_size, m_context.m_logical_undo_data->get_packer_buffer (), redo_data);
+                                  (int) redo_size, m_context.m_logical_undo_data->get_buffer_start (), redo_data);
         log_append_postpone (thread_p, m_context.m_postpone_rcv_index, &m_addr,
                              (int) m_context.m_logical_undo_data->get_current_size (),
-                             m_context.m_logical_undo_data->get_packer_buffer ());
+                             m_context.m_logical_undo_data->get_buffer_start ());
         break;
       case btree_logging_context::type::ACTIVE_REDO:
         log_append_redo_data (thread_p, RVBT_RECORD_MODIFY_NO_UNDO, &m_addr, (int) redo_size, redo_data);
