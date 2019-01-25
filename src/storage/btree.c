@@ -35769,7 +35769,7 @@ btree_rv_write_logical_undo (btid_int & btree_info, const db_value & key, btree_
 
   // todo - implement packer index_writeval
   OR_BUF buf;
-  logical_undo.assign_or_buf (key_size, buf);
+  logical_undo.delegate_to_or_buf (key_size, buf);
   if (btree_info.key_type->type->index_writeval (&buf, CONST_CAST (db_value *, &key)) != NO_ERROR)
     {
       // we cannot fail...
@@ -35812,7 +35812,7 @@ btree_packer_pack_key_value (packing_packer & packer, const db_value & key, cons
     }
 
   OR_BUF buf;
-  packer.assign_or_buf (key_size, buf);
+  packer.delegate_to_or_buf (key_size, buf);
   if (key_type.index_writeval (&buf, CONST_CAST (db_value *, &key)) != NO_ERROR)
     {
       assert (false);		// this is fatal error
