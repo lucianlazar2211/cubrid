@@ -4988,7 +4988,7 @@ index_builder_loader_task::index_builder_loader_task (const BTID * btid, const O
 
 index_builder_loader_task::~index_builder_loader_task ()
 {
-  cubmem::switch_to_global_allocator_and_call (&index_builder_loader_task::clear_keys, this);
+  cubmem::switch_to_global_allocator_and_call ([this] { clear_keys (); });
 }
 
 bool
