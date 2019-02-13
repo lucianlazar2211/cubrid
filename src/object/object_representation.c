@@ -357,7 +357,7 @@ or_class_name (RECDES * record)
  *    record(in): disk record
  */
 int
-or_rep_id (RECDES * record)
+or_rep_id (const RECDES * record)
 {
   int rep = NULL_REPRID;
 
@@ -490,7 +490,7 @@ or_replace_rep_id (RECDES * record, int repid)
  *    record(in): disk record
  */
 int
-or_chn (RECDES * record)
+or_chn (const RECDES * record)
 {
   if (record->length < OR_CHN_OFFSET + OR_CHN_SIZE)
     {

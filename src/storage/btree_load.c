@@ -3082,7 +3082,7 @@ btree_sort_get_next (THREAD_ENTRY * thread_p, RECDES * temp_recdes, void *arg)
 
       if (sort_args->filter)
 	{
-	  if (heap_attrinfo_read_dbvalues (thread_p, &sort_args->cur_oid, &sort_args->in_recdes, NULL,
+	  if (heap_attrinfo_read_dbvalues (thread_p, &sort_args->cur_oid, &sort_args->in_recdes,
 					   sort_args->filter->cache_pred) != NO_ERROR)
 	    {
 	      return SORT_ERROR_OCCURRED;
@@ -3101,7 +3101,7 @@ btree_sort_get_next (THREAD_ENTRY * thread_p, RECDES * temp_recdes, void *arg)
 
       if (sort_args->func_index_info && sort_args->func_index_info->expr)
 	{
-	  if (heap_attrinfo_read_dbvalues (thread_p, &sort_args->cur_oid, &sort_args->in_recdes, NULL,
+	  if (heap_attrinfo_read_dbvalues (thread_p, &sort_args->cur_oid, &sort_args->in_recdes,
 					   sort_args->func_index_info->expr->cache_attrinfo) != NO_ERROR)
 	    {
 	      return SORT_ERROR_OCCURRED;
@@ -3110,7 +3110,7 @@ btree_sort_get_next (THREAD_ENTRY * thread_p, RECDES * temp_recdes, void *arg)
 
       if (sort_args->n_attrs == 1)
 	{			/* single-column index */
-	  if (heap_attrinfo_read_dbvalues (thread_p, &sort_args->cur_oid, &sort_args->in_recdes, NULL,
+	  if (heap_attrinfo_read_dbvalues (thread_p, &sort_args->cur_oid, &sort_args->in_recdes,
 					   &sort_args->attr_info) != NO_ERROR)
 	    {
 	      return SORT_ERROR_OCCURRED;
@@ -4851,7 +4851,7 @@ online_index_builder (THREAD_ENTRY * thread_p, BTID_INT * btid_int, HFID * hfids
 
       if (filter_pred)
 	{
-	  ret = heap_attrinfo_read_dbvalues (thread_p, &cur_oid, &cur_record, NULL, filter_pred->cache_pred);
+	  ret = heap_attrinfo_read_dbvalues (thread_p, &cur_oid, &cur_record, filter_pred->cache_pred);
 	  if (ret != NO_ERROR)
 	    {
 	      return ret;
@@ -4870,8 +4870,7 @@ online_index_builder (THREAD_ENTRY * thread_p, BTID_INT * btid_int, HFID * hfids
 
       if (p_func_idx_info && p_func_idx_info->expr)
 	{
-	  ret = heap_attrinfo_read_dbvalues (thread_p, &cur_oid, &cur_record, NULL,
-					     p_func_idx_info->expr->cache_attrinfo);
+	  ret = heap_attrinfo_read_dbvalues (thread_p, &cur_oid, &cur_record, p_func_idx_info->expr->cache_attrinfo);
 	  if (ret != NO_ERROR)
 	    {
 	      return ret;
@@ -4881,7 +4880,7 @@ online_index_builder (THREAD_ENTRY * thread_p, BTID_INT * btid_int, HFID * hfids
       if (n_attrs == 1)
 	{
 	  /* Single column index. */
-	  ret = heap_attrinfo_read_dbvalues (thread_p, &cur_oid, &cur_record, NULL, attr_info);
+	  ret = heap_attrinfo_read_dbvalues (thread_p, &cur_oid, &cur_record, attr_info);
 	  if (ret != NO_ERROR)
 	    {
 	      return ret;

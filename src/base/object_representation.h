@@ -1246,10 +1246,10 @@ extern "C"
 }
 #endif
 
-extern int or_rep_id (RECDES * record);
+extern int or_rep_id (const RECDES * record);
 extern int or_set_rep_id (RECDES * record, int repid);
 extern int or_replace_rep_id (RECDES * record, int repid);
-extern int or_chn (RECDES * record);
+extern int or_chn (const RECDES * record);
 extern int or_replace_chn (RECDES * record, int chn);
 extern int or_mvcc_get_repid_and_flags (OR_BUF * buf, int *error);
 extern int or_mvcc_set_repid_and_flags (OR_BUF * buf, int mvcc_flag, int repid, int bound_bit,
